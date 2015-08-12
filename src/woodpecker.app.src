@@ -1,0 +1,12 @@
+{application, woodpecker, [
+    {description, "An Erlang HTTP woodpecker"},
+    {vsn, "0.1.0"},
+    {id, "git"},
+    {modules, []},
+    {registered, [woodpecker]},
+    {applications, [
+        kernel, 
+        stdlib, 
+        gun
+    ]}
+]}.
