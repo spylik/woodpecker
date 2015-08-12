@@ -58,18 +58,19 @@
         gun_pid,                            % gun connection Pid
         gun_ref,                            % gun monitor refference
         api_requests_quota,                 % current api requests quota
-        unix_timestamp,                     % current time
         timeout_for_processing_requests,    % timeout for requests with status "processing"
         timeout_for_nofin_requests,         % timeout for requests with status "nofin"
+        degradation_for_incomplete_requests,% Degradation for incomplete requests (retry_count * to this variable)
         heartbeat_freq,                     % heartbeat frequency (in milliseconds)
         heartbeat_tref                      % last heartbeat time refference
     }).
 
 % defaults (we can change it via start_link/1 arguments
 -define(REQUESTS_ALLOWED_BY_API, 600).          % 600 requests per
--define(REQUESTS_ALLOWED_IN_PERIOD, 600).       % 10 minutes in seconds
--define(TIMEOUT_FOR_PROCESSING_REQUESTS, 30).   % 1 munutes in seconds 
--define(TIMEOUT_FOR_NOFIN_REQUESTS, 180).       % 3 munutes in seconds 
+-define(REQUESTS_ALLOWED_IN_PERIOD, 600000).       % 10 minutes in seconds
+-define(TIMEOUT_FOR_PROCESSING_REQUESTS, 60000).   % 1 munutes in seconds 
+-define(TIMEOUT_FOR_NOFIN_REQUESTS, 180000).       % 3 munutes in seconds
+-define(DEGRADATION_FOR_INCOMPLETE_REQUEST, 1000). % 1 second
 -define(HEARTBEAT_FREQ, 1000).                  % every one second (in millisecond)
 
 % --------------------------------- gen_server part --------------------------------------
@@ -82,19 +83,16 @@ start_link(Prop) ->
 
 init(Prop) ->
     Server = proplists:get_value(server,Prop),
-
-    % temp (we need to allow change default via argument to start_link/1)
     Requests_allowed_by_api = ?REQUESTS_ALLOWED_BY_API,
     Requests_allowed_in_period = ?REQUESTS_ALLOWED_IN_PERIOD,
     Timeout_for_processing_requests = ?TIMEOUT_FOR_PROCESSING_REQUESTS,
     Timeout_for_nofin_requests = ?TIMEOUT_FOR_NOFIN_REQUESTS,
+    Degradation_for_incomplete_requests = ?DEGRADATION_FOR_INCOMPLETE_REQUEST,
     Heartbeat_freq = ?HEARTBEAT_FREQ,
-
 
     Ets = generate_ets_name(Server),
     ets:new(Ets, [ordered_set, protected, {keypos, #api_tasks.ref}, named_table]),
 
-    Time = maria_libs:now_unix_timestamp(),
     TRef = erlang:send_after(Heartbeat_freq, self(), heartbeat),
 
     % return state
@@ -105,9 +103,9 @@ init(Prop) ->
             requests_allowed_by_api = Requests_allowed_by_api,
             api_requests_quota = Requests_allowed_by_api,
             requests_allowed_in_period = Requests_allowed_in_period,
-            unix_timestamp = Time,
             timeout_for_processing_requests = Timeout_for_processing_requests,
             timeout_for_nofin_requests = Timeout_for_nofin_requests,
+            degradation_for_incomplete_requests = Degradation_for_incomplete_requests,
             heartbeat_freq = Heartbeat_freq,
             heartbeat_tref = TRef
         }}.
@@ -132,7 +130,7 @@ handle_cast({create_task, Method, Priority, Url}, State) ->
             priority = Priority,
             method = Method,
             url = Url,
-            insert_date = State#state.unix_timestamp,
+            insert_date = erlang:convert_time_unit(erlang:system_time(), native, milli_seconds),
             max_retry = 9999,               % temp
             retry_count = 0                 % temp
         }),
@@ -169,18 +167,15 @@ handle_cast(Msg, State) ->
 % to prevent blocking new data arrivals
 %
 handle_info(heartbeat, State) ->
-    lager:debug("got heartbeat"),
+%    lager:notice("got heartbeat"),
     _ = erlang:cancel_timer(State#state.heartbeat_tref),
     
-    % to prevent maria_libs:now_unix_timestamp multicall, we going to store time in the state
-    UnixTime = maria_libs:now_unix_timestamp(),
-    NewThan = UnixTime - State#state.requests_allowed_in_period,
+    NewThan = erlang:convert_time_unit(erlang:system_time(), native, milli_seconds) - State#state.requests_allowed_in_period,
     
     % we going to run task
     Quota = run_task(
         State#state.ets,
-        State#state.requests_allowed_by_api-requests_in_period(State#state.ets,NewThan), 
-        {unix_timestamp, UnixTime}
+        State#state.requests_allowed_by_api-requests_in_period(State#state.ets,NewThan) 
     ),
 
     % going to delete completed requests
@@ -196,14 +191,13 @@ handle_info(heartbeat, State) ->
     {noreply, 
         State#state{
             api_requests_quota=Quota, 
-            unix_timestamp=UnixTime, 
             heartbeat_tref=TRef
         }
     };
 
 % gun_response, nofin state
 handle_info({gun_response,_ConnPid,ReqRef,nofin,200,_Headers}, State) ->
-    ets:update_element(State#state.ets, ReqRef, [{#api_tasks.status, got_gun_response}, {#api_tasks.last_response_date, State#state.unix_timestamp}]),
+    ets:update_element(State#state.ets, ReqRef, [{#api_tasks.status, got_gun_response}, {#api_tasks.last_response_date, erlang:convert_time_unit(erlang:system_time(), native, milli_seconds)}]),
     {noreply, State};
 
 % gun_data, nofin state
@@ -219,7 +213,7 @@ handle_info({gun_data,_ConnPid,ReqRef,nofin,Data}, State) ->
     ets:insert(State#state.ets, 
         Task#api_tasks{
             status = got_nofin_data,
-            last_response_date = State#state.unix_timestamp,
+            last_response_date = erlang:convert_time_unit(erlang:system_time(), native, milli_seconds),
             chunked_data = Chunked
         }),
     lager:notice("got data with nofin state for ReqRef ~p",[ReqRef]),
@@ -238,10 +232,10 @@ handle_info({gun_data,_ConnPid,ReqRef,fin,Data}, State) ->
     ets:insert(State#state.ets, 
         Task#api_tasks{
             status = got_fin_data,
-            last_response_date = State#state.unix_timestamp,
+            last_response_date = erlang:convert_time_unit(erlang:system_time(), native, milli_seconds),
             chunked_data = Chunked
         }),
-    msg_router:pub(?MODULE, bitstamp_getter_gun_http, <<"bitstamp.getter.gun.http.gun_data">>, [{parse_http, Chunked}, {send_recipe, self(), ReqRef}]),
+    msg_router:pub(?MODULE, State#state.server, <<"gun_data">>, [{data, Chunked}, {send_recipe, self(), ReqRef}]),
     lager:notice("got data with fin state for ReqRef ~p",[ReqRef]),
     {noreply, State};
 
@@ -303,7 +297,8 @@ connect(State, _) ->
 
 % request
 request(State, Task, undefined) ->
-    ets:update_element(State#state.ets, Task#api_tasks.ref, {#api_tasks.status, need_retry}),
+    lager:notice("going to update to need_retry"),
+    ets:update_element(State#state.ets, Task#api_tasks.ref, [{#api_tasks.status, need_retry}]),
     undefined;
 request(State, Task, GunPid) when Task#api_tasks.method =:= get ->
     ReqRef = gun:get(GunPid, Task#api_tasks.url),
@@ -315,16 +310,15 @@ update_processing_request(_, _, undefined) ->
 update_processing_request(State, Task, ReqRef) ->
     case Task#api_tasks.ref =/= ReqRef of
         true ->
-            ets:delete(State#state.ets, Task#api_tasks.ref),
-            Date = State#state.unix_timestamp;
+            ets:delete(State#state.ets, Task#api_tasks.ref);
         false ->
-            Date = State#state.unix_timestamp
+            ok
     end,
     ets:insert(State#state.ets, 
         Task#api_tasks{
             ref = ReqRef,
             status = processing,
-            request_date = Date,
+            request_date = erlang:convert_time_unit(erlang:system_time(), native, milli_seconds),
             retry_count = Task#api_tasks.retry_count + 1
         }).
 
@@ -346,8 +340,9 @@ flush_gun(State, ConnRef) ->
 % get requests quota
 requests_in_period(Ets, DateFrom) ->
     MS = [{
-            {api_tasks,'_','_','_','_','_','_','_','_','$1','_','_','_','_'},
+            {api_tasks,'_','$2','_','_','_','_','_','_','$1','_','_','_','_'},
                 [
+                    {'=/=','$2',need_retry},
                     {'=/=','$1',undefined},
                     {'>','$1',{const,DateFrom}}
                 ],
@@ -358,8 +353,9 @@ requests_in_period(Ets, DateFrom) ->
 
 % retry staled requests
 retry_staled_requests(State) ->
-    LessThanNofin = State#state.unix_timestamp - State#state.timeout_for_nofin_requests,
-    LessThanProcessing = State#state.unix_timestamp - State#state.timeout_for_processing_requests,
+    UnixTime = erlang:convert_time_unit(erlang:system_time(), native, milli_seconds),
+    LessThanNofin = UnixTime - State#state.timeout_for_nofin_requests,
+    LessThanProcessing = UnixTime - State#state.timeout_for_processing_requests,
     MS = [{
             {api_tasks,'_','$1','_','_','_','_','_','_','_','$2','_','_','_'},
                 [
@@ -416,9 +412,13 @@ clean_completed(Ets, OldThan, LastKey) ->
     end.
 
 % run task from ets-queue
-run_task(Ets, Quota, {unix_timestamp, UnixTime}) ->
-%   F = ets:fun2ms(fun(MS = #api_tasks{status=need_retry, priority=high, retry_count=RetryCount, max_retry=MaxRetry, request_date=RequestData}) when RetryCount < MaxRetry, RequestData < UnixTime-RetryCount orelse RequestData < UnixTime-3600 -> MS end),
+run_task(Ets, Quota) ->
+
+%!!!!!!!!!!!!!!!!!! need implement    degradation_for_incomplete_requests
+    
+    %   F = ets:fun2ms(fun(MS = #api_tasks{status=need_retry, priority=high, retry_count=RetryCount, max_retry=MaxRetry, request_date=RequestData}) when RetryCount < MaxRetry, RequestData < UnixTime-RetryCount orelse RequestData < UnixTime-3600 -> MS end),
 %   io:format("F1 is ~p",[F]),
+    UnixTime = erlang:convert_time_unit(erlang:system_time(), native, milli_seconds),
     Order = [
         % priority = urgent, status=need_retry, retry_count < max_retry
         [{
@@ -447,7 +447,7 @@ run_task(Ets, Quota, {unix_timestamp, UnixTime}) ->
                 {'<','$1','$2'},
                 {'orelse',
                     {'<','$3',{'-',{const,UnixTime},'$1'}},
-                    {'<','$3',{'-',{const,UnixTime},3600}}
+                    {'<','$3',{'-',{const,UnixTime},3600000}}
                 }
             ],
             ['$_']
@@ -474,7 +474,7 @@ run_task(Ets, Quota, {unix_timestamp, UnixTime}) ->
                 {'<','$1','$2'},
                 {'orelse',
                     {'<','$3',{'-',{const,UnixTime},'$1'}},
-                    {'<','$3',{'-',{const,UnixTime},3600}}
+                    {'<','$3',{'-',{const,UnixTime},3600000}}
                 }
             ],
             ['$_']
@@ -501,7 +501,7 @@ run_task(Ets, Quota, {unix_timestamp, UnixTime}) ->
                 {'<','$1','$2'},
                 {'orelse',
                     {'<','$3',{'-',{const,UnixTime},'$1'}},
-                    {'<','$3',{'-',{const,UnixTime},3600}}
+                    {'<','$3',{'-',{const,UnixTime},3600000}}
                 }
             ],
             ['$_']
@@ -533,6 +533,7 @@ run_task(Ets, Quota, cast_stage, [H|T]) ->
 run_task(_Ets, Quota, _, []) ->
     Quota.
 
+% generate ETS table name
 generate_ets_name(Server) ->
     list_to_atom(lists:append([atom_to_list(Server), "_api_tasks"])).
 
