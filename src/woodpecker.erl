@@ -1,10 +1,9 @@
 %% --------------------------------------------------------------------------------
-%% File:    bitstamp_getter_gun_http.erl
+%% File:    woodpecker.erl
 %% @author  Oleksii Semilietov <spylik@gmail.com>
 %%
 %% @doc
-%% This source code is part of project "Maria" (https://github.com/spylik/maria)
-%% and contin...
+%% Woodpecker is  
 %%
 %% We support 4 types of requests priority:
 %% 
