@@ -41,71 +41,26 @@
         get_bitstamp_rate/0
     ]).
 
-% time debugging
--ifndef(TIMEON).
--define(TIMEON, maria_libs:timeon(?LINE,?MODULE,self())).
--define(TIMEOFF, maria_libs:timeoff(?LINE,?MODULE,self())).
--endif.
 
-% record for keep state
--record(state, {
-        server,                             % servername
-        connect_to,                         % connect_to servername
-        requests_allowed_by_api,            % count of requests allowd by api per period
-        requests_allowed_in_period,         % period
-        ets,                                % generated ets_name
-        gun_pid,                            % gun connection Pid
-        gun_ref,                            % gun monitor refference
-        api_requests_quota,                 % current api requests quota
-        timeout_for_processing_requests,    % timeout for requests with status "processing"
-        timeout_for_nofin_requests,         % timeout for requests with status "nofin"
-        degradation_for_incomplete_requests,% Degradation for incomplete requests (retry_count * to this variable)
-        heartbeat_freq,                     % heartbeat frequency (in milliseconds)
-        heartbeat_tref                      % last heartbeat time refference
-    }).
-
-% defaults (we can change it via start_link/1 arguments
--define(REQUESTS_ALLOWED_BY_API, 600).          % 600 requests per
--define(REQUESTS_ALLOWED_IN_PERIOD, 600000).       % 10 minutes in seconds
--define(TIMEOUT_FOR_PROCESSING_REQUESTS, 60000).   % 1 munutes in seconds 
--define(TIMEOUT_FOR_NOFIN_REQUESTS, 180000).       % 3 munutes in seconds
--define(DEGRADATION_FOR_INCOMPLETE_REQUEST, 1000). % 1 second
--define(HEARTBEAT_FREQ, 1000).                  % every one second (in millisecond)
 
 % --------------------------------- gen_server part --------------------------------------
 
 % start api
-start_link(Prop) ->
-    gen_server:start_link(
-        {local, proplists:get_value(server,Prop)}, 
-        ?MODULE, Prop, []).
 
-init(Prop) ->
-    Server = proplists:get_value(server,Prop),
-    Requests_allowed_by_api = ?REQUESTS_ALLOWED_BY_API,
-    Requests_allowed_in_period = ?REQUESTS_ALLOWED_IN_PERIOD,
-    Timeout_for_processing_requests = ?TIMEOUT_FOR_PROCESSING_REQUESTS,
-    Timeout_for_nofin_requests = ?TIMEOUT_FOR_NOFIN_REQUESTS,
-    Degradation_for_incomplete_requests = ?DEGRADATION_FOR_INCOMPLETE_REQUEST,
-    Heartbeat_freq = ?HEARTBEAT_FREQ,
+start_link(State) when State#woodpecker_state.server =/= undefined 
+        andalso State#woodpecker_state.connect_to =/= undefined ->
+    gen_server:start_link({local, State#woodpecker_state.server}, ?MODULE, State, []).
 
-    Ets = generate_ets_name(Server),
+init(State) ->
+    Ets = generate_ets_name(State#woodpecker_state.server),
     ets:new(Ets, [ordered_set, protected, {keypos, #api_tasks.ref}, named_table]),
 
-    TRef = erlang:send_after(Heartbeat_freq, self(), heartbeat),
+    TRef = erlang:send_after(State#woodpecker_state.heartbeat_freq, self(), heartbeat),
 
     % return state
     {ok, 
-        #state{
-            server = Server, 
+        State#woodpecker_state{
             ets = Ets,
-            requests_allowed_by_api = Requests_allowed_by_api,
-            api_requests_quota = Requests_allowed_by_api,
-            requests_allowed_in_period = Requests_allowed_in_period,
-            timeout_for_processing_requests = Timeout_for_processing_requests,
-            timeout_for_nofin_requests = Timeout_for_nofin_requests,
-            degradation_for_incomplete_requests = Degradation_for_incomplete_requests,
-            heartbeat_freq = Heartbeat_freq,
             heartbeat_tref = TRef
         }}.
 
@@ -122,21 +77,21 @@ handle_call(Msg, _From, State) ->
 % create task
 handle_cast({create_task, Method, Priority, Url}, State) ->
     TempRef = erlang:make_ref(),
-    ets:insert(State#state.ets, 
+    ets:insert(State#woodpecker_state.ets, 
         Task = #api_tasks{
             ref = TempRef,
             status = new,
             priority = Priority,
             method = Method,
             url = Url,
-            insert_date = erlang:convert_time_unit(erlang:system_time(), native, milli_seconds),
+            insert_date = get_time(),
             max_retry = 9999,               % temp
             retry_count = 0                 % temp
         }),
     case Priority of
         urgent ->
             gen_server:cast(self(), [gun_request, Task]);
-        high when State#state.api_requests_quota > 0 ->
+        high when State#woodpecker_state.api_requests_quota > 0 ->
             gen_server:cast(self(), [gun_request, Task]);
         _ ->
             ok
@@ -146,8 +101,8 @@ handle_cast({create_task, Method, Priority, Url}, State) ->
 % gun_request
 handle_cast([gun_request, Task], State) ->
     update_processing_request(State, Task, Task#api_tasks.ref),
-    NewState = connect(State, State#state.gun_pid),
-    request(NewState, Task, NewState#state.gun_pid),
+    NewState = connect(State, State#woodpecker_state.gun_pid),
+    request(NewState, Task, NewState#woodpecker_state.gun_pid),
     {noreply, NewState};
 
 
@@ -160,35 +115,29 @@ handle_cast(Msg, State) ->
 
 %--------------handle_info-----------------
 
-% every-second heartbeat
-%
-% todo: due a lot of heartbeat routine maybe we need to move this routine to separate process
-% to prevent blocking new data arrivals
-%
+% heartbeat
 handle_info(heartbeat, State) ->
-%    lager:notice("got heartbeat"),
-    _ = erlang:cancel_timer(State#state.heartbeat_tref),
+    _ = erlang:cancel_timer(State#woodpecker_state.heartbeat_tref),
     
-    NewThan = erlang:convert_time_unit(erlang:system_time(), native, milli_seconds) - State#state.requests_allowed_in_period,
+    NewThan = get_time() - State#woodpecker_state.requests_allowed_in_period,
     
     % we going to run task
-    Quota = run_task(
-        State#state.ets,
-        State#state.requests_allowed_by_api-requests_in_period(State#state.ets,NewThan) 
-    ),
+    RequestsInPeriod = requests_in_period(State#woodpecker_state.ets,NewThan),
+    OldQuota = State#woodpecker_state.requests_allowed_by_api-RequestsInPeriod,
+    Quota = run_task(State#woodpecker_state{api_requests_quota = OldQuota}),
 
     % going to delete completed requests
-    clean_completed(State#state.ets,NewThan),
+    clean_completed(State#woodpecker_state.ets,NewThan),
 
     % going to change state to need_retry for staled requests (processing, got_nofin) 
     retry_staled_requests(State),
 
     % new heartbeat time refference
-    TRef = erlang:send_after(State#state.heartbeat_freq, self(), heartbeat),
+    TRef = erlang:send_after(State#woodpecker_state.heartbeat_freq, self(), heartbeat),
 
     % return state    
     {noreply, 
-        State#state{
+        State#woodpecker_state{
             api_requests_quota=Quota, 
             heartbeat_tref=TRef
         }
@@ -196,12 +145,16 @@ handle_info(heartbeat, State) ->
 
 % gun_response, nofin state
 handle_info({gun_response,_ConnPid,ReqRef,nofin,200,_Headers}, State) ->
-    ets:update_element(State#state.ets, ReqRef, [{#api_tasks.status, got_gun_response}, {#api_tasks.last_response_date, erlang:convert_time_unit(erlang:system_time(), native, milli_seconds)}]),
+    ets:update_element(
+        State#woodpecker_state.ets, ReqRef, [
+            {#api_tasks.status, got_gun_response}, 
+            {#api_tasks.last_response_date, get_time()}
+        ]),
     {noreply, State};
 
 % gun_data, nofin state
 handle_info({gun_data,_ConnPid,ReqRef,nofin,Data}, State) ->
-    [Task] = ets:lookup(State#state.ets, ReqRef),
+    [Task] = ets:lookup(State#woodpecker_state.ets, ReqRef),
     case Task#api_tasks.chunked_data of
         undefined -> 
             Chunked = Data;
@@ -209,10 +162,10 @@ handle_info({gun_data,_ConnPid,ReqRef,nofin,Data}, State) ->
             OldData = Task#api_tasks.chunked_data,
             Chunked = <<OldData/binary, Data/binary>>
     end,
-    ets:insert(State#state.ets, 
+    ets:insert(State#woodpecker_state.ets, 
         Task#api_tasks{
             status = got_nofin_data,
-            last_response_date = erlang:convert_time_unit(erlang:system_time(), native, milli_seconds),
+            last_response_date = get_time(),
             chunked_data = Chunked
         }),
     lager:notice("got data with nofin state for ReqRef ~p",[ReqRef]),
@@ -220,7 +173,7 @@ handle_info({gun_data,_ConnPid,ReqRef,nofin,Data}, State) ->
 
 % gun_data, fin state
 handle_info({gun_data,_ConnPid,ReqRef,fin,Data}, State) ->
-    [Task] = ets:lookup(State#state.ets, ReqRef),
+    [Task] = ets:lookup(State#woodpecker_state.ets, ReqRef),
     case Task#api_tasks.chunked_data of
         undefined -> 
             Chunked = Data;
@@ -228,25 +181,32 @@ handle_info({gun_data,_ConnPid,ReqRef,fin,Data}, State) ->
             OldData = Task#api_tasks.chunked_data,
             Chunked = <<OldData/binary, Data/binary>>
     end,
-    ets:insert(State#state.ets, 
+    ets:insert(State#woodpecker_state.ets, 
         Task#api_tasks{
             status = got_fin_data,
-            last_response_date = erlang:convert_time_unit(erlang:system_time(), native, milli_seconds),
+            last_response_date = get_time(),
             chunked_data = Chunked
         }),
-    msg_router:pub(?MODULE, State#state.server, <<"gun_data">>, [{data, Chunked}, {send_recipe, self(), ReqRef}]),
+
+    % final output
+    msg_router:pub(?MODULE, State#woodpecker_state.server, <<"gun_data">>, [
+            {data, Chunked}, 
+            {send_recipe, self(), ReqRef}
+        ]),
     lager:notice("got data with fin state for ReqRef ~p",[ReqRef]),
     {noreply, State};
 
-% recipe
+% got recipe
 handle_info({recipe, ReqRef, NewStatus}, State) ->
-    ets:update_element(State#state.ets, ReqRef, {#api_tasks.status, NewStatus}),
+    ets:update_element(State#woodpecker_state.ets, ReqRef, {#api_tasks.status, NewStatus}),
     {noreply, State};
 
 % gun_error
 handle_info({gun_error,ConnPid,ReqRef,{Reason,Descr}}, State) ->
     lager:error("got gun_error for ReqRef ~p with reason: ~p, ~p",[ReqRef, Reason, Descr]),
-    ets:update_element(State#state.ets, ReqRef, {#api_tasks.status, need_retry}),
+    ets:update_element(State#woodpecker_state.ets, ReqRef, 
+        {#api_tasks.status, need_retry}
+    ),
     NewState = flush_gun(State, ConnPid),
     {noreply, NewState};
 
@@ -273,20 +233,19 @@ terminate(_Reason, State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-% ===================================== end of gen_server part ==================================
-% ----------------------------------- other functions --------------------------------
+% ============================ end of gen_server part ==========================
+% --------------------------------- other functions ----------------------------
 
 % ----------------------- other private functions ---------------------------
 
-% We going to do more in one openned connection to reduce new connection overhead.
-% But if connection closed, we going to open new one when we have new tasks
+% open new connection to the server or do nothing if connection present
 connect(State, undefined) ->
     lager:alert("need new connection"),
     {ok, Pid} = gun:open("www.bitstamp.net", 443, #{retry=>0}),
     case gun:await_up(Pid) of
         {ok, http} ->
             GunRef = monitor(process, Pid),
-            State#state{gun_pid=Pid, gun_ref=GunRef};
+            State#woodpecker_state{gun_pid=Pid, gun_ref=GunRef};
         {error, timeout} ->
             flush_gun(State, Pid)
     end;
@@ -297,7 +256,9 @@ connect(State, _) ->
 % request
 request(State, Task, undefined) ->
     lager:notice("going to update to need_retry"),
-    ets:update_element(State#state.ets, Task#api_tasks.ref, [{#api_tasks.status, need_retry}]),
+    ets:update_element(State#woodpecker_state.ets, Task#api_tasks.ref, [
+            {#api_tasks.status, need_retry}
+        ]),
     undefined;
 request(State, Task, GunPid) when Task#api_tasks.method =:= get ->
     ReqRef = gun:get(GunPid, Task#api_tasks.url),
@@ -309,32 +270,32 @@ update_processing_request(_, _, undefined) ->
 update_processing_request(State, Task, ReqRef) ->
     case Task#api_tasks.ref =/= ReqRef of
         true ->
-            ets:delete(State#state.ets, Task#api_tasks.ref);
+            ets:delete(State#woodpecker_state.ets, Task#api_tasks.ref);
         false ->
             ok
     end,
-    ets:insert(State#state.ets, 
+    ets:insert(State#woodpecker_state.ets, 
         Task#api_tasks{
             ref = ReqRef,
             status = processing,
-            request_date = erlang:convert_time_unit(erlang:system_time(), native, milli_seconds),
+            request_date = get_time(),
             retry_count = Task#api_tasks.retry_count + 1
         }).
 
 % gun clean_up
 flush_gun(State, ConnRef) ->
-    case ConnRef =/= undefined andalso State#state.gun_pid =:= ConnRef of
+    case ConnRef =/= undefined andalso State#woodpecker_state.gun_pid =:= ConnRef of
         true -> 
-            demonitor(State#state.gun_ref),
-            gun:close(State#state.gun_pid),
-            gun:flush(State#state.gun_pid);
+            demonitor(State#woodpecker_state.gun_ref),
+            gun:close(State#woodpecker_state.gun_pid),
+            gun:flush(State#woodpecker_state.gun_pid);
         false -> 
             gun:close(ConnRef),
             gun:flush(ConnRef),
-            gun:close(State#state.gun_pid),
-            gun:flush(State#state.gun_pid)
+            gun:close(State#woodpecker_state.gun_pid),
+            gun:flush(State#woodpecker_state.gun_pid)
     end,
-    State#state{gun_pid=undefined, gun_ref=undefined}.
+    State#woodpecker_state{gun_pid=undefined, gun_ref=undefined}.
 
 % get requests quota
 requests_in_period(Ets, DateFrom) ->
@@ -352,9 +313,9 @@ requests_in_period(Ets, DateFrom) ->
 
 % retry staled requests
 retry_staled_requests(State) ->
-    UnixTime = erlang:convert_time_unit(erlang:system_time(), native, milli_seconds),
-    LessThanNofin = UnixTime - State#state.timeout_for_nofin_requests,
-    LessThanProcessing = UnixTime - State#state.timeout_for_processing_requests,
+    Time = get_time(),
+    LessThanNofin = Time - State#woodpecker_state.timeout_for_nofin_requests,
+    LessThanProcessing = Time - State#woodpecker_state.timeout_for_processing_requests,
     MS = [{
             {api_tasks,'_','$1','_','_','_','_','_','_','_','$2','_','_','_'},
                 [
@@ -381,45 +342,46 @@ retry_staled_requests(State) ->
         ],
     lists:map(
         fun(Task) ->
-            lager:notice("Task is ~p",[Task]),
-            ets:insert(State#state.ets, 
+            ets:insert(State#woodpecker_state.ets, 
                 Task#api_tasks{
                     status = need_retry,
                     chunked_data = undefined
             })
         end,
-        ets:select(State#state.ets, MS)).
+        ets:select(State#woodpecker_state.ets, MS)).
 
 % going to clean completed requests
 clean_completed(Ets,OldThan) ->
     ets:safe_fixtable(Ets,true),
     clean_completed(Ets, OldThan, ets:first(Ets)),
     ets:safe_fixtable(Ets,false).
-
 clean_completed(_Ets, _OldThan, '$end_of_table') ->
     true;
-
 clean_completed(Ets, OldThan, LastKey) ->
     case ets:lookup(Ets, LastKey) of
-        [Data = #api_tasks{}] when Data#api_tasks.request_date =/= undefined, Data#api_tasks.request_date < OldThan, Data#api_tasks.status=:= complete ->
-            ets:delete(Ets, LastKey),
-            clean_completed(Ets, OldThan,ets:next(Ets, LastKey));
-        [Data = #api_tasks{}] when Data#api_tasks.request_date =/= undefined, Data#api_tasks.request_date < OldThan ->
-            clean_completed(Ets, OldThan,ets:next(Ets, LastKey));
+        [Data = #api_tasks{}] when 
+            Data#api_tasks.request_date =/= undefined, 
+            Data#api_tasks.request_date < OldThan, 
+            Data#api_tasks.status=:= complete ->
+                ets:delete(Ets, LastKey),
+                clean_completed(Ets, OldThan,ets:next(Ets, LastKey));
+        [Data = #api_tasks{}] when 
+            Data#api_tasks.request_date =/= undefined, 
+            Data#api_tasks.request_date < OldThan ->
+                clean_completed(Ets, OldThan,ets:next(Ets, LastKey));
         _ -> 
             ok
     end.
 
 % run task from ets-queue
-run_task(Ets, Quota) ->
-
-%!!!!!!!!!!!!!!!!!! need implement    degradation_for_incomplete_requests
-    
-    %   F = ets:fun2ms(fun(MS = #api_tasks{status=need_retry, priority=high, retry_count=RetryCount, max_retry=MaxRetry, request_date=RequestData}) when RetryCount < MaxRetry, RequestData < UnixTime-RetryCount orelse RequestData < UnixTime-3600 -> MS end),
+run_task(State) ->
+    %   F = ets:fun2ms(fun(MS = #api_tasks{status=need_retry, priority=high, retry_count=RetryCount, max_retry=MaxRetry, request_date=RequestData}) when RetryCount < MaxRetry, RequestData < Time-RetryCount orelse RequestData < Time-3600 -> MS end),
 %   io:format("F1 is ~p",[F]),
-    UnixTime = erlang:convert_time_unit(erlang:system_time(), native, milli_seconds),
+    Time = get_time(),
     Order = [
-        % priority = urgent, status=need_retry, retry_count < max_retry
+        % priority = urgent, 
+        % status=need_retry, 
+        % retry_count < max_retry
         [{
             {api_tasks,'_',need_retry,urgent,'_','_','_','_','_','_','_','_','$2','$1'},
             [
@@ -429,7 +391,10 @@ run_task(Ets, Quota) ->
         }],
 
 
-        % priority = high, status=need_retry, retry_count < 10, retry_count < max_retry 
+        % priority = high, 
+        % status=need_retry, 
+        % retry_count < 10, 
+        % retry_count < max_retry 
         [{
             {api_tasks,'_',need_retry,high,'_','_','_','_','_','_','_','_','$2','$1'},
             [
@@ -439,24 +404,35 @@ run_task(Ets, Quota) ->
             ['$_']
         }],
 
-        % priority = high, status=need_retry, retry_count > 10 andalso retry_count < max_retry, request_date < UnixTime-retry_count orelse request_date < UnixTime-3600
+        % priority = high, 
+        % status=need_retry, 
+        % retry_count > 10 
+        %   andalso 
+        %      retry_count < max_retry, 
+        % request_date < Time-retry_count 
+        %   orelse 
+        %       request_date < Time-3600
         [{
             {api_tasks,'_',need_retry,high,'_','_','_','_','_','$3','_','_','$2','$1'},
             [
                 {'<','$1','$2'},
                 {'orelse',
-                    {'<','$3',{'-',{const,UnixTime},'$1'}},
-                    {'<','$3',{'-',{const,UnixTime},3600000}}
+                    {'<','$3',{'-',{const,Time},'$1'}},
+                    {'<','$3',{'-',{const,Time},State#woodpecker_state.max_degr_for_incomplete_requests}}
                 }
             ],
             ['$_']
         }],
 
-        % priority = high, status=new
+        % priority = high, 
+        % status=new
         [{{api_tasks,'_',new,high,'_','_','_','_','_','_','_','_','_','_'},[],['$_']}],
 
 
-        % priority = normal, status=need_retry, retry_count < 10 andalso retry_count < max_retry
+        % priority = normal, 
+        % status=need_retry, 
+        % retry_count < 10,
+        % retry_count < max_retry
         [{
             {api_tasks,'_',need_retry,normal,'_','_','_','_','_','_','_','_','$2','$1'},
             [
@@ -466,24 +442,36 @@ run_task(Ets, Quota) ->
             ['$_']
         }],
 
-        % priority = normal, status=need_retry, retry_count > 10 andalso retry_count < max_retry, request_date < UnixTime-retry_count orelse request_date < UnixTime-3600
+        % priority = normal, 
+        % status=need_retry, 
+        % retry_count > 10 
+        %   andalso 
+        %       retry_count < max_retry, 
+        % request_date < Time-retry_count 
+        %   orelse 
+        %       request_date < Time-3600
         [{
             {api_tasks,'_',need_retry,normal,'_','_','_','_','_','$3','_','_','$2','$1'},
             [
                 {'<','$1','$2'},
                 {'orelse',
-                    {'<','$3',{'-',{const,UnixTime},'$1'}},
-                    {'<','$3',{'-',{const,UnixTime},3600000}}
+                    {'<','$3',{'-',{const,Time},'$1'}},
+                    {'<','$3',{'-',{const,Time},State#woodpecker_state.max_degr_for_incomplete_requests}}
                 }
             ],
             ['$_']
         }],
 
-        % priority = normal, status=new
+        % priority = normal, 
+        % status=new
         [{{api_tasks,'_',new,normal,'_','_','_','_','_','_','_','_','_','_'},[],['$_']}],
 
 
-        % priority = low, status=need_retry, retry_count < 10 andalso retry_count < max_retry
+        % priority = low, 
+        % status=need_retry, 
+        % retry_count < 10 
+        %   andalso 
+        %       retry_count < max_retry
         [{
             {api_tasks,'_',need_retry,low,'_','_','_','_','_','_','_','_','$2','$1'},
             [
@@ -493,48 +481,60 @@ run_task(Ets, Quota) ->
             ['$_']
         }],
 
-        % priority = low, status=need_retry, retry_count > 10 andalso retry_count < max_retry, request_date < UnixTime-retry_count orelse request_date < UnixTime-3600
+        % priority = low, 
+        % status=need_retry, 
+        % retry_count > 10 
+        %   andalso 
+        %       retry_count < max_retry, 
+        % request_date < Time-retry_count 
+        %   orelse 
+        %       request_date < Time-3600
         [{
             {api_tasks,'_',need_retry,low,'_','_','_','_','_','$3','_','_','$2','$1'},
             [
                 {'<','$1','$2'},
                 {'orelse',
-                    {'<','$3',{'-',{const,UnixTime},'$1'}},
-                    {'<','$3',{'-',{const,UnixTime},3600000}}
+                    {'<','$3',{'-',{const,Time},'$1'}},
+                    {'<','$3',{'-',{const,Time},State#woodpecker_state.max_degr_for_incomplete_requests}}
                 }
             ],
             ['$_']
         }],
 
-        % priority = low, status=new
+        % priority = low, 
+        % status=new
         [{{api_tasks,'_',new,low,'_','_','_','_','_','_','_','_','_','_'},[],['$_']}]
     ],
-    run_task(Ets, Quota, order_stage, Order).
+    run_task(State, order_stage, Order).
 
-run_task(Ets, Quota, order_stage, [H|T]) ->
-    case Quota > 0 of
+run_task(State, order_stage, [H|T]) ->
+    case State#woodpecker_state.api_requests_quota > 0 of
         true ->
-%            lager:notice("Spec is ~p",[H]),
-            QuotaNew = run_task(Ets, Quota, cast_stage, ets:select(Ets, H)),
-            run_task(Ets, QuotaNew, order_stage, T);
+            QuotaNew = run_task(State, cast_stage, ets:select(State#woodpecker_state.ets, H)),
+            run_task(State#woodpecker_state{api_requests_quota=QuotaNew}, order_stage, T);
         false ->
             0
     end;
 
-run_task(Ets, Quota, cast_stage, [H|T]) ->
-    case Quota > 0 of
+run_task(State, cast_stage, [H|T]) ->
+    case State#woodpecker_state.api_requests_quota > 0 of
         true ->
             gen_server:cast(self(), [gun_request, H]),
-            run_task(Ets, Quota - 1, cast_stage, T);
+            QuotaNew = State#woodpecker_state.api_requests_quota -1,
+            run_task(State#woodpecker_state{api_requests_quota=QuotaNew}, cast_stage, T);
         false ->
             0
     end;
-run_task(_Ets, Quota, _, []) ->
-    Quota.
+run_task(State, _, []) ->
+    State#woodpecker_state.api_requests_quota.
 
 % generate ETS table name
 generate_ets_name(Server) ->
     list_to_atom(lists:append([atom_to_list(Server), "_api_tasks"])).
+
+% get time
+get_time() ->
+    erlang:convert_time_unit(erlang:system_time(), native, milli_seconds).
 
 %---------------------- public api others functions ----------------------
 
