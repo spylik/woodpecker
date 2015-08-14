@@ -24,7 +24,7 @@
 -module(woodpecker).
 
 -include("woodpecker.hrl").
-%-include_lib("stdlib/include/ms_transform.hrl").
+-include_lib("stdlib/include/ms_transform.hrl").
 
 % gen server is here
 -behaviour(gen_server).
@@ -49,11 +49,12 @@
 
 start_link(State) when State#woodpecker_state.server =/= undefined 
         andalso State#woodpecker_state.connect_to =/= undefined ->
+    lager:info("Woodpecker start with state ~p", [lager:pr(State, ?MODULE)]),
     gen_server:start_link({local, State#woodpecker_state.server}, ?MODULE, State, []).
 
 init(State) ->
     Ets = generate_ets_name(State#woodpecker_state.server),
-    ets:new(Ets, [ordered_set, protected, {keypos, #api_tasks.ref}, named_table]),
+    ets:new(Ets, [set, protected, {keypos, #api_tasks.ref}, named_table]),
 
     TRef = erlang:send_after(State#woodpecker_state.heartbeat_freq, self(), heartbeat),
 
@@ -84,9 +85,7 @@ handle_cast({create_task, Method, Priority, Url}, State) ->
             priority = Priority,
             method = Method,
             url = Url,
-            insert_date = get_time(),
-            max_retry = 9999,               % temp
-            retry_count = 0                 % temp
+            insert_date = get_time()
         }),
     case Priority of
         urgent ->
@@ -375,7 +374,8 @@ clean_completed(Ets, OldThan, LastKey) ->
 
 % run task from ets-queue
 run_task(State) ->
-    %   F = ets:fun2ms(fun(MS = #api_tasks{status=need_retry, priority=high, retry_count=RetryCount, max_retry=MaxRetry, request_date=RequestData}) when RetryCount < MaxRetry, RequestData < Time-RetryCount orelse RequestData < Time-3600 -> MS end),
+%!!!!!!!!!!!!!!!!!!!!!!!! need implement degradation with *
+%       F = ets:fun2ms(fun(MS = #api_tasks{status=need_retry, priority=high, retry_count=RetryCount, max_retry=MaxRetry, request_date=RequestData}) when RetryCount < MaxRetry, RequestData < Time-RetryCount orelse RequestData < Time-3600 -> MS end),
 %   io:format("F1 is ~p",[F]),
     Time = get_time(),
     Order = [
@@ -417,7 +417,7 @@ run_task(State) ->
             [
                 {'<','$1','$2'},
                 {'orelse',
-                    {'<','$3',{'-',{const,Time},'$1'}},
+                    {'<','$3',{'-',{const,Time},{'*','$1', State#woodpecker_state.degr_for_incomplete_requests}}},
                     {'<','$3',{'-',{const,Time},State#woodpecker_state.max_degr_for_incomplete_requests}}
                 }
             ],
@@ -455,7 +455,7 @@ run_task(State) ->
             [
                 {'<','$1','$2'},
                 {'orelse',
-                    {'<','$3',{'-',{const,Time},'$1'}},
+                    {'<','$3',{'-',{const,Time},{'*','$1', State#woodpecker_state.degr_for_incomplete_requests}}},
                     {'<','$3',{'-',{const,Time},State#woodpecker_state.max_degr_for_incomplete_requests}}
                 }
             ],
@@ -494,7 +494,7 @@ run_task(State) ->
             [
                 {'<','$1','$2'},
                 {'orelse',
-                    {'<','$3',{'-',{const,Time},'$1'}},
+                    {'<','$3',{'-',{const,Time},{'*','$1', State#woodpecker_state.degr_for_incomplete_requests}}},
                     {'<','$3',{'-',{const,Time},State#woodpecker_state.max_degr_for_incomplete_requests}}
                 }
             ],

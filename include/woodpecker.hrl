@@ -11,16 +11,17 @@
 		request_date,
 		last_response_date,
 		chunked_data,
-		max_retry,
-		retry_count
+		max_retry = 9999,
+		retry_count = 0
 	}).
 
 %% - need specify by user
 -record(woodpecker_state, {
         % user specification section
         server,                                      % moderate: servername
-        connect_to,                                  % moderate: server to connect 
-        requests_allowed_by_api = 600,               % count of requests allowd by api per period
+        connect_to,                                  % moderate: server to connect
+        report_topic,                                % generated or predefined output topic
+        requests_allowed_by_api = 600,               % count of requests allowed by api per period
         requests_allowed_in_period = 600000,         % period (milli-seconds)
         timeout_for_processing_requests = 60000,     % timeout for requests with status "processing" (milli-seconds)
         timeout_for_nofin_requests = 180000,         % timeout for requests with status "nofin" (milli-seconds)
@@ -28,9 +29,9 @@
         max_degr_for_incomplete_requests = 3600000,  % Max degradation for incomplete requests
         heartbeat_freq = 1000,                       % heartbeat frequency (in milliseconds)
         % woodpecker operations section
-        ets,                                         % generated ets_name
-        gun_pid,                                     % gun connection Pid
-        gun_ref,                                     % gun monitor refference
+        ets,                                         % generated ets_name saved in state
+        gun_pid,                                     % current gun connection Pid
+        gun_ref,                                     % current gun monitor refference
         api_requests_quota,                          % current api requests quota
         heartbeat_tref                               % last heartbeat time refference
     }).
