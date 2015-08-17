@@ -24,7 +24,7 @@
 -module(woodpecker).
 
 -include("woodpecker.hrl").
--include_lib("stdlib/include/ms_transform.hrl").
+%-include_lib("stdlib/include/ms_transform.hrl").
 
 % gen server is here
 -behaviour(gen_server).
@@ -49,7 +49,7 @@
 
 start_link(State) when State#woodpecker_state.server =/= undefined 
         andalso State#woodpecker_state.connect_to =/= undefined ->
-    lager:info("Woodpecker start with state ~p", [lager:pr(State, ?MODULE)]),
+    error_logger:info_msg("Woodpecker start with state ~p",[State]),
     gen_server:start_link({local, State#woodpecker_state.server}, ?MODULE, State, []).
 
 init(State) ->
@@ -69,7 +69,7 @@ init(State) ->
 
 % handle_call for all other thigs
 handle_call(Msg, _From, State) ->
-    lager:warning("we are in undefined handle_call with message ~p~n",[Msg]),
+    error_logger:warning_msg("we are in undefined handle_call with message ~p~n",[Msg]),
     {reply, ok, State}.
 %-----------end of handle_call-------------
 
@@ -107,7 +107,7 @@ handle_cast([gun_request, Task], State) ->
 
 % handle_cast for all other thigs
 handle_cast(Msg, State) ->
-    lager:warning("we are in undefined handle cast with message ~p~n",[Msg]),
+    error_logger:warning_msg("we are in undefined handle cast with message ~p~n",[Msg]),
     {noreply, State}.
 %-----------end of handle_cast-------------
 
@@ -154,32 +154,20 @@ handle_info({gun_response,_ConnPid,ReqRef,nofin,200,_Headers}, State) ->
 % gun_data, nofin state
 handle_info({gun_data,_ConnPid,ReqRef,nofin,Data}, State) ->
     [Task] = ets:lookup(State#woodpecker_state.ets, ReqRef),
-    case Task#api_tasks.chunked_data of
-        undefined -> 
-            Chunked = Data;
-        _ -> 
-            OldData = Task#api_tasks.chunked_data,
-            Chunked = <<OldData/binary, Data/binary>>
-    end,
+    Chunked = chunk_data(Task#api_tasks.chunked_data, Data),
     ets:insert(State#woodpecker_state.ets, 
         Task#api_tasks{
             status = got_nofin_data,
             last_response_date = get_time(),
             chunked_data = Chunked
         }),
-    lager:notice("got data with nofin state for ReqRef ~p",[ReqRef]),
+    error_logger:info_msg("got data with nofin state for ReqRef ~p",[ReqRef]),
     {noreply, State};
 
 % gun_data, fin state
 handle_info({gun_data,_ConnPid,ReqRef,fin,Data}, State) ->
     [Task] = ets:lookup(State#woodpecker_state.ets, ReqRef),
-    case Task#api_tasks.chunked_data of
-        undefined -> 
-            Chunked = Data;
-        _ ->
-            OldData = Task#api_tasks.chunked_data,
-            Chunked = <<OldData/binary, Data/binary>>
-    end,
+    Chunked = chunk_data(Task#api_tasks.chunked_data, Data),
     ets:insert(State#woodpecker_state.ets, 
         Task#api_tasks{
             status = got_fin_data,
@@ -188,11 +176,11 @@ handle_info({gun_data,_ConnPid,ReqRef,fin,Data}, State) ->
         }),
 
     % final output
-    msg_router:pub(?MODULE, State#woodpecker_state.server, <<"gun_data">>, [
+    erlroute:pub(?MODULE, State#woodpecker_state.server, <<"gun_data">>, [
             {data, Chunked}, 
             {send_recipe, self(), ReqRef}
         ]),
-    lager:notice("got data with fin state for ReqRef ~p",[ReqRef]),
+    error_logger:info_msg("got data with fin state for ReqRef ~p",[ReqRef]),
     {noreply, State};
 
 % got recipe
@@ -200,9 +188,11 @@ handle_info({recipe, ReqRef, NewStatus}, State) ->
     ets:update_element(State#woodpecker_state.ets, ReqRef, {#api_tasks.status, NewStatus}),
     {noreply, State};
 
+% close and other events bringing gun to flush
+
 % gun_error
 handle_info({gun_error,ConnPid,ReqRef,{Reason,Descr}}, State) ->
-    lager:error("got gun_error for ReqRef ~p with reason: ~p, ~p",[ReqRef, Reason, Descr]),
+    error_logger:error_msg("got gun_error for ReqRef ~p with reason: ~p, ~p",[ReqRef, Reason, Descr]),
     ets:update_element(State#woodpecker_state.ets, ReqRef, 
         {#api_tasks.status, need_retry}
     ),
@@ -221,7 +211,7 @@ handle_info({'DOWN', _ReqRef, _, ConnPid, _}, State) ->
 
 % handle_info for all other thigs
 handle_info(Msg, State) ->
-    lager:warning("we are in undefined handle info with message ~p~n",[Msg]),
+    error_logger:warning_msg("we are in undefined handle info with message ~p~n",[Msg]),
     {noreply, State}.
 %-----------end of handle_info-------------
 
@@ -239,7 +229,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 % open new connection to the server or do nothing if connection present
 connect(State, undefined) ->
-    lager:alert("need new connection"),
+    error_logger:info_msg("need new connection"),
     {ok, Pid} = gun:open("www.bitstamp.net", 443, #{retry=>0}),
     case gun:await_up(Pid) of
         {ok, http} ->
@@ -249,12 +239,12 @@ connect(State, undefined) ->
             flush_gun(State, Pid)
     end;
 connect(State, _) ->
-    lager:notice("we have connection"),
+    error_logger:info_msg("we have connection"),
     State.
 
 % request
 request(State, Task, undefined) ->
-    lager:notice("going to update to need_retry"),
+    error_logger:info_msg("going to update to need_retry"),
     ets:update_element(State#woodpecker_state.ets, Task#api_tasks.ref, [
             {#api_tasks.status, need_retry}
         ]),
@@ -262,6 +252,12 @@ request(State, Task, undefined) ->
 request(State, Task, GunPid) when Task#api_tasks.method =:= get ->
     ReqRef = gun:get(GunPid, Task#api_tasks.url),
     update_processing_request(State, Task, ReqRef).
+
+% chunk data
+chunk_data(undefined, NewData) ->
+    NewData;
+chunk_data(OldData, NewData) ->
+    <<OldData/binary, NewData/binary>>.
 
 % update request in ets
 update_processing_request(_, _, undefined) ->
@@ -283,18 +279,24 @@ update_processing_request(State, Task, ReqRef) ->
 
 % gun clean_up
 flush_gun(State, ConnRef) ->
-    case ConnRef =/= undefined andalso State#woodpecker_state.gun_pid =:= ConnRef of
-        true -> 
+    error_logger:info_msg("We are in flush gun section with state ~p", [State]),
+    case ConnRef =:= undefined of
+        true when State#woodpecker_state.gun_ref =/= undefined ->
             demonitor(State#woodpecker_state.gun_ref),
             gun:close(State#woodpecker_state.gun_pid),
             gun:flush(State#woodpecker_state.gun_pid);
-        false -> 
+        true ->
+            ok;
+        false when State#woodpecker_state.gun_pid =:= undefined ->
             gun:close(ConnRef),
-            gun:flush(ConnRef),
+            gun:flush(ConnRef);
+        false when State#woodpecker_state.gun_pid =:= ConnRef ->
+            demonitor(State#woodpecker_state.gun_ref),
             gun:close(State#woodpecker_state.gun_pid),
             gun:flush(State#woodpecker_state.gun_pid)
     end,
     State#woodpecker_state{gun_pid=undefined, gun_ref=undefined}.
+
 
 % get requests quota
 requests_in_period(Ets, DateFrom) ->
@@ -374,7 +376,6 @@ clean_completed(Ets, OldThan, LastKey) ->
 
 % run task from ets-queue
 run_task(State) ->
-%!!!!!!!!!!!!!!!!!!!!!!!! need implement degradation with *
 %       F = ets:fun2ms(fun(MS = #api_tasks{status=need_retry, priority=high, retry_count=RetryCount, max_retry=MaxRetry, request_date=RequestData}) when RetryCount < MaxRetry, RequestData < Time-RetryCount orelse RequestData < Time-3600 -> MS end),
 %   io:format("F1 is ~p",[F]),
     Time = get_time(),

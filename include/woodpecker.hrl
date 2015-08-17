@@ -15,7 +15,6 @@
 		retry_count = 0
 	}).
 
-%% - need specify by user
 -record(woodpecker_state, {
         % user specification section
         server,                                      % moderate: servername
