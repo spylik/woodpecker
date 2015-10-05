@@ -36,9 +36,8 @@
 % public api
 -export([
         start_link/1,
-        get_bitstamp_orderbook/0,
-        get_bitstamp_transactions/0,
-        get_bitstamp_rate/0
+        get/2,
+        get/3
     ]).
 
 
@@ -50,19 +49,27 @@
 start_link(State) when State#woodpecker_state.server =/= undefined 
         andalso State#woodpecker_state.connect_to =/= undefined ->
     error_logger:info_msg("Woodpecker start with state ~p",[State]),
-    gen_server:start_link({local, State#woodpecker_state.server}, ?MODULE, State, []).
+    gen_server:start_link({local, State#woodpecker_state.server}, ?MODULE, [State, self()], []).
 
-init(State) ->
-    Ets = generate_ets_name(State#woodpecker_state.server),
-    ets:new(Ets, [set, protected, {keypos, #api_tasks.ref}, named_table]),
+% when #erlpusher_state.report_to undefined, we going to send output to parent pid
+init([State = #woodpecker_state{report_to = undefined}, Parent]) ->
+    init([State#woodpecker_state{report_to = Parent}, Parent]);
 
-    TRef = erlang:send_after(State#woodpecker_state.heartbeat_freq, self(), heartbeat),
+init([State = #woodpecker_state{
+        server = Server, 
+        heartbeat_freq = Heartbeat_freq
+    }, _Parent]) ->
+    Ets = generate_ets_name(Server),
+    ets:new(Ets, [set, protected, {keypos, #wp_api_tasks.ref}, named_table]),
+
+    TRef = erlang:send_after(Heartbeat_freq, self(), heartbeat),
 
     % return state
     {ok, 
         State#woodpecker_state{
             ets = Ets,
-            heartbeat_tref = TRef
+            heartbeat_tref = TRef,
+            report_topic = generate_topic(State)
         }}.
 
 %--------------handle_call-----------------
@@ -79,7 +86,7 @@ handle_call(Msg, _From, State) ->
 handle_cast({create_task, Method, Priority, Url}, State) ->
     TempRef = erlang:make_ref(),
     ets:insert(State#woodpecker_state.ets, 
-        Task = #api_tasks{
+        Task = #wp_api_tasks{
             ref = TempRef,
             status = new,
             priority = Priority,
@@ -99,7 +106,7 @@ handle_cast({create_task, Method, Priority, Url}, State) ->
 
 % gun_request
 handle_cast([gun_request, Task], State) ->
-    update_processing_request(State, Task, Task#api_tasks.ref),
+    update_processing_request(State, Task, Task#wp_api_tasks.ref),
     NewState = connect(State, State#woodpecker_state.gun_pid),
     request(NewState, Task, NewState#woodpecker_state.gun_pid),
     {noreply, NewState};
@@ -115,24 +122,30 @@ handle_cast(Msg, State) ->
 %--------------handle_info-----------------
 
 % heartbeat
-handle_info(heartbeat, State) ->
-    _ = erlang:cancel_timer(State#woodpecker_state.heartbeat_tref),
+handle_info(heartbeat, State = #woodpecker_state{
+        heartbeat_tref = Heartbeat_tref, 
+        requests_allowed_in_period = Requests_allowed_in_period,
+        ets = Ets,
+        heartbeat_freq = Heartbeat_freq,
+        requests_allowed_by_api = Requests_allowed_by_api
+    }) ->
+    _ = erlang:cancel_timer(Heartbeat_tref),
     
-    NewThan = get_time() - State#woodpecker_state.requests_allowed_in_period,
+    NewThan = get_time() - Requests_allowed_in_period,
     
     % we going to run task
-    RequestsInPeriod = requests_in_period(State#woodpecker_state.ets,NewThan),
-    OldQuota = State#woodpecker_state.requests_allowed_by_api-RequestsInPeriod,
+    RequestsInPeriod = requests_in_period(Ets,NewThan),
+    OldQuota = Requests_allowed_by_api-RequestsInPeriod,
     Quota = run_task(State#woodpecker_state{api_requests_quota = OldQuota}),
 
     % going to delete completed requests
-    clean_completed(State#woodpecker_state.ets,NewThan),
+    clean_completed(Ets,NewThan),
 
     % going to change state to need_retry for staled requests (processing, got_nofin) 
     retry_staled_requests(State),
 
     % new heartbeat time refference
-    TRef = erlang:send_after(State#woodpecker_state.heartbeat_freq, self(), heartbeat),
+    TRef = erlang:send_after(Heartbeat_freq, self(), heartbeat),
 
     % return state    
     {noreply, 
@@ -146,17 +159,17 @@ handle_info(heartbeat, State) ->
 handle_info({gun_response,_ConnPid,ReqRef,nofin,200,_Headers}, State) ->
     ets:update_element(
         State#woodpecker_state.ets, ReqRef, [
-            {#api_tasks.status, got_gun_response}, 
-            {#api_tasks.last_response_date, get_time()}
+            {#wp_api_tasks.status, got_gun_response}, 
+            {#wp_api_tasks.last_response_date, get_time()}
         ]),
     {noreply, State};
 
 % gun_data, nofin state
 handle_info({gun_data,_ConnPid,ReqRef,nofin,Data}, State) ->
     [Task] = ets:lookup(State#woodpecker_state.ets, ReqRef),
-    Chunked = chunk_data(Task#api_tasks.chunked_data, Data),
+    Chunked = chunk_data(Task#wp_api_tasks.chunked_data, Data),
     ets:insert(State#woodpecker_state.ets, 
-        Task#api_tasks{
+        Task#wp_api_tasks{
             status = got_nofin_data,
             last_response_date = get_time(),
             chunked_data = Chunked
@@ -167,16 +180,16 @@ handle_info({gun_data,_ConnPid,ReqRef,nofin,Data}, State) ->
 % gun_data, fin state
 handle_info({gun_data,_ConnPid,ReqRef,fin,Data}, State) ->
     [Task] = ets:lookup(State#woodpecker_state.ets, ReqRef),
-    Chunked = chunk_data(Task#api_tasks.chunked_data, Data),
+    Chunked = chunk_data(Task#wp_api_tasks.chunked_data, Data),
     ets:insert(State#woodpecker_state.ets, 
-        Task#api_tasks{
+        Task#wp_api_tasks{
             status = got_fin_data,
             last_response_date = get_time(),
             chunked_data = Chunked
         }),
 
     % final output
-    erlroute:pub(?MODULE, State#woodpecker_state.server, <<"gun_data">>, [
+    send_output(State, [
             {data, Chunked}, 
             {send_recipe, self(), ReqRef}
         ]),
@@ -185,7 +198,7 @@ handle_info({gun_data,_ConnPid,ReqRef,fin,Data}, State) ->
 
 % got recipe
 handle_info({recipe, ReqRef, NewStatus}, State) ->
-    ets:update_element(State#woodpecker_state.ets, ReqRef, {#api_tasks.status, NewStatus}),
+    ets:update_element(State#woodpecker_state.ets, ReqRef, {#wp_api_tasks.status, NewStatus}),
     {noreply, State};
 
 % close and other events bringing gun to flush
@@ -194,7 +207,7 @@ handle_info({recipe, ReqRef, NewStatus}, State) ->
 handle_info({gun_error,ConnPid,ReqRef,{Reason,Descr}}, State) ->
     error_logger:error_msg("got gun_error for ReqRef ~p with reason: ~p, ~p",[ReqRef, Reason, Descr]),
     ets:update_element(State#woodpecker_state.ets, ReqRef, 
-        {#api_tasks.status, need_retry}
+        {#wp_api_tasks.status, need_retry}
     ),
     NewState = flush_gun(State, ConnPid),
     {noreply, NewState};
@@ -228,9 +241,12 @@ code_change(_OldVsn, State, _Extra) ->
 % ----------------------- other private functions ---------------------------
 
 % open new connection to the server or do nothing if connection present
-connect(State, undefined) ->
+connect(State = #woodpecker_state{
+        connect_to = Connect_to,
+        connect_to_port = Connect_to_port
+    }, undefined) ->
     error_logger:info_msg("need new connection"),
-    {ok, Pid} = gun:open("www.bitstamp.net", 443, #{retry=>0}),
+    {ok, Pid} = gun:open(Connect_to, Connect_to_port, #{retry=>0}),
     case gun:await_up(Pid) of
         {ok, http} ->
             GunRef = monitor(process, Pid),
@@ -245,12 +261,12 @@ connect(State, _) ->
 % request
 request(State, Task, undefined) ->
     error_logger:info_msg("going to update to need_retry"),
-    ets:update_element(State#woodpecker_state.ets, Task#api_tasks.ref, [
-            {#api_tasks.status, need_retry}
+    ets:update_element(State#woodpecker_state.ets, Task#wp_api_tasks.ref, [
+            {#wp_api_tasks.status, need_retry}
         ]),
     undefined;
-request(State, Task, GunPid) when Task#api_tasks.method =:= get ->
-    ReqRef = gun:get(GunPid, Task#api_tasks.url),
+request(State, Task, GunPid) when Task#wp_api_tasks.method =:= get ->
+    ReqRef = gun:get(GunPid, Task#wp_api_tasks.url),
     update_processing_request(State, Task, ReqRef).
 
 % chunk data
@@ -263,18 +279,18 @@ chunk_data(OldData, NewData) ->
 update_processing_request(_, _, undefined) ->
     ok;
 update_processing_request(State, Task, ReqRef) ->
-    case Task#api_tasks.ref =/= ReqRef of
+    case Task#wp_api_tasks.ref =/= ReqRef of
         true ->
-            ets:delete(State#woodpecker_state.ets, Task#api_tasks.ref);
+            ets:delete(State#woodpecker_state.ets, Task#wp_api_tasks.ref);
         false ->
             ok
     end,
     ets:insert(State#woodpecker_state.ets, 
-        Task#api_tasks{
+        Task#wp_api_tasks{
             ref = ReqRef,
             status = processing,
             request_date = get_time(),
-            retry_count = Task#api_tasks.retry_count + 1
+            retry_count = Task#wp_api_tasks.retry_count + 1
         }).
 
 % gun clean_up
@@ -301,7 +317,7 @@ flush_gun(State, ConnRef) ->
 % get requests quota
 requests_in_period(Ets, DateFrom) ->
     MS = [{
-            {api_tasks,'_','$2','_','_','_','_','_','_','$1','_','_','_','_'},
+            {wp_api_tasks,'_','$2','_','_','_','_','_','_','$1','_','_','_','_'},
                 [
                     {'=/=','$2',need_retry},
                     {'=/=','$1',undefined},
@@ -318,7 +334,7 @@ retry_staled_requests(State) ->
     LessThanNofin = Time - State#woodpecker_state.timeout_for_nofin_requests,
     LessThanProcessing = Time - State#woodpecker_state.timeout_for_processing_requests,
     MS = [{
-            {api_tasks,'_','$1','_','_','_','_','_','_','_','$2','_','_','_'},
+            {wp_api_tasks,'_','$1','_','_','_','_','_','_','_','$2','_','_','_'},
                 [
                     {'orelse',
                         [
@@ -344,7 +360,7 @@ retry_staled_requests(State) ->
     lists:map(
         fun(Task) ->
             ets:insert(State#woodpecker_state.ets, 
-                Task#api_tasks{
+                Task#wp_api_tasks{
                     status = need_retry,
                     chunked_data = undefined
             })
@@ -360,15 +376,15 @@ clean_completed(_Ets, _OldThan, '$end_of_table') ->
     true;
 clean_completed(Ets, OldThan, LastKey) ->
     case ets:lookup(Ets, LastKey) of
-        [Data = #api_tasks{}] when 
-            Data#api_tasks.request_date =/= undefined, 
-            Data#api_tasks.request_date < OldThan, 
-            Data#api_tasks.status=:= complete ->
+        [Data = #wp_api_tasks{}] when 
+            Data#wp_api_tasks.request_date =/= undefined, 
+            Data#wp_api_tasks.request_date < OldThan, 
+            Data#wp_api_tasks.status=:= complete ->
                 ets:delete(Ets, LastKey),
                 clean_completed(Ets, OldThan,ets:next(Ets, LastKey));
-        [Data = #api_tasks{}] when 
-            Data#api_tasks.request_date =/= undefined, 
-            Data#api_tasks.request_date < OldThan ->
+        [Data = #wp_api_tasks{}] when 
+            Data#wp_api_tasks.request_date =/= undefined, 
+            Data#wp_api_tasks.request_date < OldThan ->
                 clean_completed(Ets, OldThan,ets:next(Ets, LastKey));
         _ -> 
             ok
@@ -376,7 +392,7 @@ clean_completed(Ets, OldThan, LastKey) ->
 
 % run task from ets-queue
 run_task(State) ->
-%       F = ets:fun2ms(fun(MS = #api_tasks{status=need_retry, priority=high, retry_count=RetryCount, max_retry=MaxRetry, request_date=RequestData}) when RetryCount < MaxRetry, RequestData < Time-RetryCount orelse RequestData < Time-3600 -> MS end),
+%       F = ets:fun2ms(fun(MS = #wp_api_tasks{status=need_retry, priority=high, retry_count=RetryCount, max_retry=MaxRetry, request_date=RequestData}) when RetryCount < MaxRetry, RequestData < Time-RetryCount orelse RequestData < Time-3600 -> MS end),
 %   io:format("F1 is ~p",[F]),
     Time = get_time(),
     Order = [
@@ -537,11 +553,21 @@ generate_ets_name(Server) ->
 get_time() ->
     erlang:convert_time_unit(erlang:system_time(), native, milli_seconds).
 
+% generate report topic
+generate_topic(State = #woodpecker_state{report_topic = undefined}) ->
+    list_to_binary(atom_to_list(State#woodpecker_state.server)++".output");
+generate_topic(State) ->
+    State#woodpecker_state.report_topic.
+
+% send output
+send_output(_State = #woodpecker_state{report_to=erlroute, report_topic=Report_topic, server=Server}, Frame) ->
+    erlroute:pub(?MODULE, Server, Report_topic, Frame);
+send_output(_State = #woodpecker_state{report_to=ReportTo}, Frame) ->
+    ReportTo ! Frame.
+
 %---------------------- public api others functions ----------------------
 
-get_bitstamp_rate() ->
-    gen_server:cast(self(), {create_task,get,low,"/api/eur_usd/"}).
-get_bitstamp_orderbook() ->
-    gen_server:cast(self(), {create_task,get,low,"/api/order_book/"}).
-get_bitstamp_transactions() ->
-    gen_server:cast(self(), {create_task,get,low,"/api/transactions/?time=hour"}).
+get(Pid, Url) ->
+    get(Pid, Url, low).
+get(Pid, Url, Proprity) ->
+    gen_server:cast(Pid, {create_task,get,Proprity,Url}).
