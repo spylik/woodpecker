@@ -1,0 +1,58 @@
+= Woody Woodpecker with Gun
+
+Woody Woodpecker is an anthropomorphic animated woodpecker who appeared in theatrical short films produced by the Walter Lantz animation studio and distributed by Universal Pictures. Though not the first of the screwball
+characters that became popular in the 1940s, Woody is one of the most indicative of the type. (c) https://en.wikipedia.org/wiki/Woody_Woodpecker[wikipedia]
+
+Erlang **woodpecker** also can peck, but he **peck http servers until got answer that will satisfy him**.
+
+Woodpecker uses https://github.com/ninenines/gun[Gun]. Special thanks go to well known erlang gun dealer https://github.com/essen[Loïc Hoguin].
+
+== Features
+
+=== Ban protection: woodpecker can use few behaviour to prevent server-side ban:
+* Limit requests per period.
+New requests will wait quota in the queue and fire when it should be safe;
+
+* Freezing (time degradation).  
+Every unsucceed request returns to the queue with delay * n of fail requests. 
+
+==== How to use:
+You can tune ban-protection behaviours on startup stage. There are few variables to tune it:
+[source,erlang]
+----
+#woodpecker_state{
+	% requests allowed by api per period, default: 600 requests
+	requests_allowed_by_api = 600, 		 	
+	
+	% period (milli-seconds), default: 10 minutes
+	requests_allowed_in_period = 600000, 		
+	
+	% Degradation for incomplete requests (milli-seconds)
+	% retry_count * this variable
+	degr_for_incomplete_requests = 1000,
+	
+	% Max degradation for incomplete requests
+	max_degr_for_incomplete_requests = 3600000
+}
+----
+
+===  Queue requests with different priority;
+* *Low proprity*: 
+Request going to queue and fire one by one.
+
+* Normal priority: 
+Request going to queue and fire one by one but on top of low priority requests.
+
+* *High priority*:
+Checking quota and try to fire. If no quota, stuff going to the top of queue.
+
+* Urgent priority:
+Don't care about queue. Fire immediately!
+
+=== 
+
+=== Success/Suck trigger.
+Woodpecker can send notice about success/unsuccess requests.
+
+
+..early draft.... to be continued 
