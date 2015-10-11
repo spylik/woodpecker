@@ -9,14 +9,14 @@ Woodpecker uses https://github.com/ninenines/gun[Gun]. Special thanks go to well
 
 == Features
 
-=== Ban protection: woodpecker can use few behaviour to prevent server-side ban:
+=== Ban protection: 
+Woodpecker can use few behaviour to prevent server-side ban:
 * Limit requests per period.
 New requests will wait quota in the queue and fire when it should be safe;
 
 * Freezing (time degradation).  
 Every unsucceed request returns to the queue with delay * n of fail requests. 
 
-==== How to use:
 You can tune ban-protection behaviours on startup stage. There are few variables to tune it:
 [source,erlang]
 ----
@@ -40,16 +40,14 @@ You can tune ban-protection behaviours on startup stage. There are few variables
 * *Low proprity*: 
 Request going to queue and fire one by one.
 
-* Normal priority: 
+* *Normal priority*: 
 Request going to queue and fire one by one but on top of low priority requests.
 
 * *High priority*:
 Checking quota and try to fire. If no quota, stuff going to the top of queue.
 
-* Urgent priority:
+* *Urgent priority*:
 Don't care about queue. Fire immediately!
-
-=== 
 
 === Success/Suck trigger.
 Woodpecker can send notice about success/unsuccess requests.
