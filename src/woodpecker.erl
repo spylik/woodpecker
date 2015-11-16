@@ -326,7 +326,7 @@ requests_in_period(Ets, DateFrom) ->
     ets:select_count(Ets, MS).
 
 %% retry staled requests
-retry_staled_requests(State = #woodpecker_state{
+retry_staled_requests(_State = #woodpecker_state{
         timeout_for_nofin_requests = Timeout_for_nofin_requests,
         timeout_for_processing_requests = Timeout_for_processing_requests,
         ets = Ets
@@ -565,7 +565,7 @@ get_time() ->
     erlang:convert_time_unit(erlang:system_time(), native, milli_seconds).
 
 %% generate report topic
-generate_topic(State = #woodpecker_state{
+generate_topic(_State = #woodpecker_state{
         report_topic = undefined,
         server = Server
     }) ->
