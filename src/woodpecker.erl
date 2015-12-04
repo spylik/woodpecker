@@ -44,6 +44,7 @@
 
 %% start api
 start_link(State) when State#woodpecker_state.server =/= undefined 
+        andalso State#woodpecker_state.connect_to_port =/= undefined
         andalso State#woodpecker_state.connect_to =/= undefined ->
     error_logger:info_msg("Woodpecker start with state ~p",[State]),
     gen_server:start_link({local, State#woodpecker_state.server}, ?MODULE, [State, self()], []).
@@ -81,6 +82,7 @@ handle_call(Msg, _From, State) ->
 
 %% create task
 handle_cast({create_task, Method, Priority, Url}, State) ->
+    error_logger:info_msg("got new task"),
     TempRef = erlang:make_ref(),
     ets:insert(State#woodpecker_state.ets, 
         Task = #wp_api_tasks{
@@ -134,6 +136,7 @@ handle_info(heartbeat, State = #woodpecker_state{
     RequestsInPeriod = requests_in_period(Ets,NewThan),
     OldQuota = Requests_allowed_by_api-RequestsInPeriod,
     Quota = run_task(State#woodpecker_state{api_requests_quota = OldQuota}),
+    error_logger:info_msg("got hearbeat, Quota: ~p",[Quota]), 
 
     % going to delete completed requests
     clean_completed(Ets,NewThan),
@@ -242,7 +245,7 @@ connect(State = #woodpecker_state{
         connect_to = Connect_to,
         connect_to_port = Connect_to_port
     }, undefined) ->
-    error_logger:info_msg("need new connection"),
+    error_logger:info_msg("need new connection ~p ~p",[Connect_to,Connect_to_port]),
     {ok, Pid} = gun:open(Connect_to, Connect_to_port, #{retry=>0}),
     case gun:await_up(Pid) of
         {ok, http} ->
@@ -404,7 +407,7 @@ run_task(State = #woodpecker_state{
         % status=need_retry, 
         % retry_count < max_retry
         [{
-            {api_tasks,'_',need_retry,urgent,'_','_','_','_','_','_','_','_','$2','$1'},
+            {wp_api_tasks,'_',need_retry,urgent,'_','_','_','_','_','_','_','_','$2','$1'},
             [
                 {'<','$1','$2'}
             ], 
@@ -417,7 +420,7 @@ run_task(State = #woodpecker_state{
         % retry_count < 10, 
         % retry_count < max_retry 
         [{
-            {api_tasks,'_',need_retry,high,'_','_','_','_','_','_','_','_','$2','$1'},
+            {wp_api_tasks,'_',need_retry,high,'_','_','_','_','_','_','_','_','$2','$1'},
             [
                 {'<','$1',10},
                 {'<','$1','$2'}
@@ -434,7 +437,7 @@ run_task(State = #woodpecker_state{
         %   orelse 
         %       request_date < Time-3600
         [{
-            {api_tasks,'_',need_retry,high,'_','_','_','_','_','$3','_','_','$2','$1'},
+            {wp_api_tasks,'_',need_retry,high,'_','_','_','_','_','$3','_','_','$2','$1'},
             [
                 {'<','$1','$2'},
                 {'orelse',
@@ -447,7 +450,7 @@ run_task(State = #woodpecker_state{
 
         % priority = high, 
         % status=new
-        [{{api_tasks,'_',new,high,'_','_','_','_','_','_','_','_','_','_'},[],['$_']}],
+        [{{wp_api_tasks,'_',new,high,'_','_','_','_','_','_','_','_','_','_'},[],['$_']}],
 
 
         % priority = normal, 
@@ -455,7 +458,7 @@ run_task(State = #woodpecker_state{
         % retry_count < 10,
         % retry_count < max_retry
         [{
-            {api_tasks,'_',need_retry,normal,'_','_','_','_','_','_','_','_','$2','$1'},
+            {wp_api_tasks,'_',need_retry,normal,'_','_','_','_','_','_','_','_','$2','$1'},
             [
                 {'<','$1',10},
                 {'<','$1','$2'}
@@ -472,7 +475,7 @@ run_task(State = #woodpecker_state{
         %   orelse 
         %       request_date < Time-3600
         [{
-            {api_tasks,'_',need_retry,normal,'_','_','_','_','_','$3','_','_','$2','$1'},
+            {wp_api_tasks,'_',need_retry,normal,'_','_','_','_','_','$3','_','_','$2','$1'},
             [
                 {'<','$1','$2'},
                 {'orelse',
@@ -485,7 +488,7 @@ run_task(State = #woodpecker_state{
 
         % priority = normal, 
         % status=new
-        [{{api_tasks,'_',new,normal,'_','_','_','_','_','_','_','_','_','_'},[],['$_']}],
+        [{{wp_api_tasks,'_',new,normal,'_','_','_','_','_','_','_','_','_','_'},[],['$_']}],
 
 
         % priority = low, 
@@ -494,7 +497,7 @@ run_task(State = #woodpecker_state{
         %   andalso 
         %       retry_count < max_retry
         [{
-            {api_tasks,'_',need_retry,low,'_','_','_','_','_','_','_','_','$2','$1'},
+            {wp_api_tasks,'_',need_retry,low,'_','_','_','_','_','_','_','_','$2','$1'},
             [
                 {'<','$1',10},
                 {'<','$1','$2'}
@@ -511,7 +514,7 @@ run_task(State = #woodpecker_state{
         %   orelse 
         %       request_date < Time-3600
         [{
-            {api_tasks,'_',need_retry,low,'_','_','_','_','_','$3','_','_','$2','$1'},
+            {wp_api_tasks,'_',need_retry,low,'_','_','_','_','_','$3','_','_','$2','$1'},
             [
                 {'<','$1','$2'},
                 {'orelse',
@@ -524,7 +527,7 @@ run_task(State = #woodpecker_state{
 
         % priority = low, 
         % status=new
-        [{{api_tasks,'_',new,low,'_','_','_','_','_','_','_','_','_','_'},[],['$_']}]
+        [{{wp_api_tasks,'_',new,low,'_','_','_','_','_','_','_','_','_','_'},[],['$_']}]
     ],
     run_task(State, order_stage, Order).
 
@@ -535,9 +538,12 @@ run_task(State = #woodpecker_state{
     }, order_stage, [H|T]) ->
     case Api_requests_quota > 0 of
         true ->
+            error_logger:info_msg("have quota1 ~p, going to run: ets:select(~p,~p)",[Api_requests_quota,Ets,H]),
             QuotaNew = run_task(State, cast_stage, ets:select(Ets, H)),
+            error_logger:info_msg("have quota2 ~p, Tails is ~p",[QuotaNew,T]),
             run_task(State#woodpecker_state{api_requests_quota=QuotaNew}, order_stage, T);
         false ->
+            error_logger:info_msg("no quota"),
             0
     end;
 
@@ -545,8 +551,10 @@ run_task(State = #woodpecker_state{
 run_task(State = #woodpecker_state{
         api_requests_quota = Api_requests_quota
     }, cast_stage, [H|T]) ->
+    error_logger:info_msg("in cast stage"),
     case Api_requests_quota > 0 of
         true ->
+            error_logger:info_msg("going to cast"),
             gen_server:cast(self(), [gun_request, H]),
             QuotaNew = Api_requests_quota -1,
             run_task(State#woodpecker_state{api_requests_quota=QuotaNew}, cast_stage, T);
