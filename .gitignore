@@ -11,3 +11,6 @@ erl_crash.dump
 relx
 config/vm.args
 ttb_last_config
+.eunit
+.rebar
+.dialyzer_plt
