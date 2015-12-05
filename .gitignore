@@ -3,7 +3,6 @@ deps/
 ebin/
 log/
 _rel/
-Mnesia.maria*
 *.dump
 erl_crash.dump
 .erlang.mk.packages.v2
@@ -14,3 +13,4 @@ ttb_last_config
 .eunit
 .rebar
 .dialyzer_plt
+woodpecker.d
