@@ -20,6 +20,8 @@
         server,                                      % moderate: servername
         connect_to,                                  % moderate: server to connect
         connect_to_port,                             % moderate: server to connect (port)
+        report_nofin_to,                             % send non-fin output frames to pid or erlroute (for realtime parsing)
+        report_nofin_topic,                          % generated or predefined output non-fin topic
         report_to,                                   % send output frames to pid or erlroute
         report_topic,                                % generated or predefined output topic
         requests_allowed_by_api = 600,               % count of requests allowed by api per period

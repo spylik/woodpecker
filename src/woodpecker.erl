@@ -24,7 +24,7 @@
 -module(woodpecker).
 
 -include("woodpecker.hrl").
-%-include_lib("stdlib/include/ms_transform.hrl").
+-include_lib("stdlib/include/ms_transform.hrl").
 
 %% gen server is here
 -behaviour(gen_server).
@@ -58,7 +58,8 @@ init([State = #woodpecker_state{
         heartbeat_freq = Heartbeat_freq
     }, _Parent]) ->
     Ets = generate_ets_name(Server),
-    ets:new(Ets, [set, protected, {keypos, #wp_api_tasks.ref}, named_table]),
+%    ets:new(Ets, [set, protected, {keypos, #wp_api_tasks.ref}, named_table]),
+    ets:new(Ets, [set, public, {keypos, #wp_api_tasks.ref}, named_table]),
 
     TRef = erlang:send_after(Heartbeat_freq, self(), heartbeat),
 
@@ -82,7 +83,7 @@ handle_call(Msg, _From, State) ->
 
 %% create task
 handle_cast({create_task, Method, Priority, Url}, State) ->
-    error_logger:info_msg("got new task"),
+    error_logger:info_msg("Woodpecker got new task"),
     TempRef = erlang:make_ref(),
     ets:insert(State#woodpecker_state.ets, 
         Task = #wp_api_tasks{
@@ -135,13 +136,13 @@ handle_info(heartbeat, State = #woodpecker_state{
     % we going to run task
     RequestsInPeriod = requests_in_period(Ets,NewThan),
     OldQuota = Requests_allowed_by_api-RequestsInPeriod,
+%    error_logger:warning_msg("got hearbeat, Going to run task"), 
     Quota = run_task(State#woodpecker_state{api_requests_quota = OldQuota}),
-    error_logger:info_msg("got hearbeat, Quota: ~p",[Quota]), 
+%    error_logger:warning_msg("Quota after heartbeat: ~p",[Quota]), 
 
     % going to delete completed requests
     clean_completed(Ets,NewThan),
 
-    % going to change state to need_retry for staled requests (processing, got_nofin) 
     retry_staled_requests(State),
 
     % new heartbeat time refference
@@ -166,34 +167,41 @@ handle_info({gun_response,_ConnPid,ReqRef,nofin,200,_Headers}, State) ->
 
 %% gun_data, nofin state
 handle_info({gun_data,_ConnPid,ReqRef,nofin,Data}, State) ->
-    [Task] = ets:lookup(State#woodpecker_state.ets, ReqRef),
-    Chunked = chunk_data(Task#wp_api_tasks.chunked_data, Data),
-    ets:insert(State#woodpecker_state.ets, 
-        Task#wp_api_tasks{
-            status = got_nofin_data,
-            last_response_date = get_time(),
-            chunked_data = Chunked
-        }),
     error_logger:info_msg("got data with nofin state for ReqRef ~p",[ReqRef]),
+    case ets:lookup(State#woodpecker_state.ets, ReqRef) of
+        [Task] -> 
+            Chunked = chunk_data(Task#wp_api_tasks.chunked_data, Data),
+            ets:insert(State#woodpecker_state.ets, 
+                Task#wp_api_tasks{
+                status = got_nofin_data,
+                last_response_date = get_time(),
+                chunked_data = Chunked
+            });
+        [] -> error_logger:warning_msg("[got_nofin] ReqRef ~p not found in ETS table. Data is ~p", [ReqRef, Data])
+    end,
     {noreply, State};
 
 %% gun_data, fin state
 handle_info({gun_data,_ConnPid,ReqRef,fin,Data}, State) ->
-    [Task] = ets:lookup(State#woodpecker_state.ets, ReqRef),
-    Chunked = chunk_data(Task#wp_api_tasks.chunked_data, Data),
-    ets:insert(State#woodpecker_state.ets, 
-        Task#wp_api_tasks{
-            status = got_fin_data,
-            last_response_date = get_time(),
-            chunked_data = Chunked
-        }),
-
-    % final output
-    send_output(State, [
-            {data, Chunked}, 
-            {send_recipe, self(), ReqRef}
-        ]),
     error_logger:info_msg("got data with fin state for ReqRef ~p",[ReqRef]),
+    case ets:lookup(State#woodpecker_state.ets, ReqRef) of
+        [Task] ->
+            Chunked = chunk_data(Task#wp_api_tasks.chunked_data, Data),
+            ets:insert(State#woodpecker_state.ets, 
+                Task#wp_api_tasks{
+                    status = got_fin_data,
+                    last_response_date = get_time(),
+                    chunked_data = Chunked
+                }
+            ),
+
+            % final output
+            send_output(State, [
+                    {data, Chunked}, 
+                    {send_recipe, self(), ReqRef}
+                ]);
+        [] -> error_logger:warning_msg("[got_fin] ReqRef ~p not found in ETS table in. Data is ~p", [ReqRef, Data])
+    end,
     {noreply, State};
 
 %% got recipe
@@ -266,6 +274,7 @@ request(State, Task, undefined) ->
         ]),
     undefined;
 request(State, Task, GunPid) when Task#wp_api_tasks.method =:= get ->
+    error_logger:info_msg("going to update to processing"),
     ReqRef = gun:get(GunPid, Task#wp_api_tasks.url),
     update_processing_request(State, Task, ReqRef).
 
@@ -337,30 +346,24 @@ retry_staled_requests(_State = #woodpecker_state{
     Time = get_time(),
     LessThanNofin = Time - Timeout_for_nofin_requests,
     LessThanProcessing = Time - Timeout_for_processing_requests,
-    MS = [{
-            {wp_api_tasks,'_','$1','_','_','_','_','_','_','_','$2','_','_','_'},
-                [
-                    {'orelse',
-                        [
-                            {'=:=','$1',processing},
-                            {'andalso',
-                                {'=/=','$2',undefined},
-                                {'<','$2',{const,LessThanProcessing}}
-                            }
-                        ],
 
-                        [
+    MS = [{
+            {wp_api_tasks,'_','$1','_','_','_','_','_','_','$3','$2','_','_','_'},
+                [   
+                    {'orelse',
+                        {'and',
+                            {'=:=','$1',processing},
+                            {'<','$3',{const,LessThanProcessing}}
+                        },
+                        {'and',
                             {'=:=','$1',got_nofin_data},
-                            {'andalso',
-                                {'=/=','$2',undefined},
-                                {'<','$2',{const,LessThanNofin}}
-                            }
-                        ]
+                            {'<','$2',{const,LessThanNofin}}
+                        }
                     }
                 ],
                 ['$_']
-            }
-        ],
+            }],
+%        io:format("ets:select(~p, ~p))~n~n",[Ets,MS]),
     lists:map(
         fun(Task) ->
             ets:insert(Ets, 
@@ -439,7 +442,10 @@ run_task(State = #woodpecker_state{
         [{
             {wp_api_tasks,'_',need_retry,high,'_','_','_','_','_','$3','_','_','$2','$1'},
             [
-                {'<','$1','$2'},
+                {'andalso',
+                    {'>','$1',9},
+                    {'<','$1','$2'}
+                },
                 {'orelse',
                     {'<','$3',{'-',{const,Time},{'*','$1', Degr_for_incomplete_requests}}},
                     {'<','$3',{'-',{const,Time},Max_degr_for_incomplete_requests}}
@@ -477,7 +483,10 @@ run_task(State = #woodpecker_state{
         [{
             {wp_api_tasks,'_',need_retry,normal,'_','_','_','_','_','$3','_','_','$2','$1'},
             [
-                {'<','$1','$2'},
+                {'andalso',
+                    {'>','$1',9},
+                    {'<','$1','$2'}
+                },
                 {'orelse',
                     {'<','$3',{'-',{const,Time},{'*','$1', Degr_for_incomplete_requests}}},
                     {'<','$3',{'-',{const,Time},Max_degr_for_incomplete_requests}}
@@ -516,7 +525,10 @@ run_task(State = #woodpecker_state{
         [{
             {wp_api_tasks,'_',need_retry,low,'_','_','_','_','_','$3','_','_','$2','$1'},
             [
-                {'<','$1','$2'},
+                {'andalso',
+                    {'>','$1',9},
+                    {'<','$1','$2'}
+                },
                 {'orelse',
                     {'<','$3',{'-',{const,Time},{'*','$1', Degr_for_incomplete_requests}}},
                     {'<','$3',{'-',{const,Time},Max_degr_for_incomplete_requests}}
@@ -538,12 +550,9 @@ run_task(State = #woodpecker_state{
     }, order_stage, [H|T]) ->
     case Api_requests_quota > 0 of
         true ->
-            error_logger:info_msg("have quota1 ~p, going to run: ets:select(~p,~p)",[Api_requests_quota,Ets,H]),
             QuotaNew = run_task(State, cast_stage, ets:select(Ets, H)),
-            error_logger:info_msg("have quota2 ~p, Tails is ~p",[QuotaNew,T]),
             run_task(State#woodpecker_state{api_requests_quota=QuotaNew}, order_stage, T);
         false ->
-            error_logger:info_msg("no quota"),
             0
     end;
 
@@ -551,10 +560,9 @@ run_task(State = #woodpecker_state{
 run_task(State = #woodpecker_state{
         api_requests_quota = Api_requests_quota
     }, cast_stage, [H|T]) ->
-    error_logger:info_msg("in cast stage"),
     case Api_requests_quota > 0 of
         true ->
-            error_logger:info_msg("going to cast"),
+%            io:format("going to cast request ~p~n",[H]),
             gen_server:cast(self(), [gun_request, H]),
             QuotaNew = Api_requests_quota -1,
             run_task(State#woodpecker_state{api_requests_quota=QuotaNew}, cast_stage, T);
@@ -587,6 +595,7 @@ send_output(_State = #woodpecker_state{
         report_topic=Report_topic, 
         server=Server
     }, Frame) ->
+    error_logger:warning_msg("Report_topic: ~p, Frame: ~p",[Report_topic,Frame]),
     erlroute:pub(?MODULE, Server, Report_topic, Frame);
 send_output(_State = #woodpecker_state{report_to=ReportTo}, Frame) ->
     ReportTo ! Frame.
