@@ -407,7 +407,8 @@ run_task(State = #woodpecker_state{
                 priority = urgent, 
                 status = need_retry, 
                 max_retry = '$2', 
-                retry_count = '$1'
+                retry_count = '$1',
+                _ = '_'
             }, [
                 {'<','$1','$2'}
             ], ['$_']
@@ -420,7 +421,8 @@ run_task(State = #woodpecker_state{
                 priority = high, 
                 status = need_retry, 
                 max_retry = '$2', 
-                retry_count = '$1'
+                retry_count = '$1',
+                _ = '_'
             }, [
                 {'<','$1',10},
                 {'<','$1','$2'}
@@ -433,7 +435,8 @@ run_task(State = #woodpecker_state{
                 status = need_retry,
                 request_date = '$3',
                 max_retry = '$2', 
-                retry_count = '$1'
+                retry_count = '$1',
+                _ = '_'
             }, [
                 {'andalso',
                     {'>','$1',9},
@@ -449,7 +452,8 @@ run_task(State = #woodpecker_state{
         [{
             #wp_api_tasks{
                 priority = high, 
-                status = new
+                status = new,
+                _ = '_'
             },
             [], ['$_']
         }],
@@ -461,7 +465,8 @@ run_task(State = #woodpecker_state{
                 priority = normal, 
                 status = need_retry, 
                 max_retry = '$2', 
-                retry_count = '$1'
+                retry_count = '$1',
+                _ = '_'
             }, [
                 {'<','$1',10},
                 {'<','$1','$2'}
@@ -474,7 +479,8 @@ run_task(State = #woodpecker_state{
                 status = need_retry,
                 request_date = '$3',
                 max_retry = '$2', 
-                retry_count = '$1'
+                retry_count = '$1',
+                _ = '_'
             }, [
                 {'andalso',
                     {'>','$1',9},
@@ -490,7 +496,8 @@ run_task(State = #woodpecker_state{
         [{
             #wp_api_tasks{
                 priority = normal, 
-                status = new
+                status = new,
+                _ = '_'
             },
             [], ['$_']
         }],
@@ -503,7 +510,8 @@ run_task(State = #woodpecker_state{
                 priority = low, 
                 status = need_retry, 
                 max_retry = '$2', 
-                retry_count = '$1'
+                retry_count = '$1',
+                _ = '_'
             }, [
                 {'<','$1',10},
                 {'<','$1','$2'}
@@ -516,7 +524,8 @@ run_task(State = #woodpecker_state{
                 status = need_retry,
                 request_date = '$3',
                 max_retry = '$2', 
-                retry_count = '$1'
+                retry_count = '$1',
+                _ = '_'
             }, [
                 {'andalso',
                     {'>','$1',9},
@@ -532,7 +541,8 @@ run_task(State = #woodpecker_state{
         [{
             #wp_api_tasks{
                 priority = low, 
-                status = new
+                status = new,
+                _ = '_'
             },
             [], ['$_']
         }]
