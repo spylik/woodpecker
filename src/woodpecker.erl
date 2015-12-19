@@ -176,7 +176,12 @@ handle_info({gun_data,_ConnPid,ReqRef,nofin,Data}, State) ->
                 status = got_nofin_data,
                 last_response_date = get_time(),
                 chunked_data = Chunked
-            });
+            }),
+            send_nofin_output(State, [
+                    {data, Data},
+                    {send_recipe, self(), ReqRef}
+                ]);
+
         [] -> error_logger:error_msg("[got_nofin] ReqRef ~p not found in ETS table. Data is ~p", [ReqRef, Data])
     end,
     {noreply, State};
@@ -235,7 +240,6 @@ handle_info(Msg, State) ->
     error_logger:warning_msg("we are in undefined handle info with message ~p~n",[Msg]),
     {noreply, State}.
 %-----------end of handle_info-------------
-
 
 terminate(_Reason, State) ->
     flush_gun(State, undefined).
@@ -325,7 +329,7 @@ flush_gun(State, ConnRef) ->
 %% get requests quota
 requests_in_period(Ets, DateFrom) ->
     MS = [{
-            {wp_api_tasks,'_','$2','_','_','_','_','_','_','$1','_','_','_','_'},
+            #wp_api_tasks{status = '$2', last_response_date = '$1', _ = '_'},
                 [
                     {'=/=','$2',need_retry},
                     {'=/=','$1',undefined},
@@ -347,7 +351,7 @@ retry_staled_requests(_State = #woodpecker_state{
     LessThanProcessing = Time - Timeout_for_processing_requests,
 
     MS = [{
-            #wp_api_tasks{status = '$1', last_response_date = '$2', request_date = '$3'},
+            #wp_api_tasks{status = '$1', last_response_date = '$2', request_date = '$3', _ = '_'},
                 [   
                     {'orelse',
                         {'and',
@@ -401,8 +405,7 @@ run_task(State = #woodpecker_state{
     }) ->
     Time = get_time(),
     Order = [
-        % --- urgent priority section ---
-        [{
+        [[{
             #wp_api_tasks{
                 priority = urgent, 
                 status = need_retry, 
@@ -411,157 +414,67 @@ run_task(State = #woodpecker_state{
                 _ = '_'
             }, [
                 {'<','$1','$2'}
-            ], ['$_']
-        }],
-        % --- end of urgent priority section ---
-
-        % --- high priority section ---
-        [{
-            #wp_api_tasks{
-                priority = high, 
-                status = need_retry, 
-                max_retry = '$2', 
-                retry_count = '$1',
-                _ = '_'
-            }, [
-                {'<','$1',10},
-                {'<','$1','$2'}
-            ], ['$_']
-        }],
-
-        [{
-            #wp_api_tasks{
-                priority = high, 
-                status = need_retry,
-                request_date = '$3',
-                max_retry = '$2', 
-                retry_count = '$1',
-                _ = '_'
-            }, [
-                {'andalso',
-                    {'>','$1',9},
+            ], 
+            ['$_']}
+        ]] | [[
+            [{
+                #wp_api_tasks{
+                    priority = Priority, 
+                    status = need_retry, 
+                    max_retry = '$2', 
+                    retry_count = '$1',
+                    _ = '_'
+                }, [
+                    {'<','$1',10},
                     {'<','$1','$2'}
+                ], ['$_']
+            }],
+            [{
+                #wp_api_tasks{
+                    priority = Priority, 
+                    status = need_retry,
+                    request_date = '$3',
+                    max_retry = '$2', 
+                    retry_count = '$1',
+                    _ = '_'
+                }, [
+                    {'andalso',
+                        {'>','$1',9},
+                        {'<','$1','$2'}
+                    },
+                    {'orelse',
+                        {'<','$3',{'-',{const,Time},{'*','$1', Degr_for_incomplete_requests}}},
+                        {'<','$3',{'-',{const,Time},Max_degr_for_incomplete_requests}}
+                    }
+                ], ['$_']
+            }],
+            [{
+                #wp_api_tasks{
+                    priority = Priority, 
+                    status = new,
+                    _ = '_'
                 },
-                {'orelse',
-                    {'<','$3',{'-',{const,Time},{'*','$1', Degr_for_incomplete_requests}}},
-                    {'<','$3',{'-',{const,Time},Max_degr_for_incomplete_requests}}
-                }
-            ], ['$_']
-        }],
+                [], ['$_']
+            }]
+        ] || Priority <- [high, normal, low]
+    ]],
 
-        [{
-            #wp_api_tasks{
-                priority = high, 
-                status = new,
-                _ = '_'
-            },
-            [], ['$_']
-        }],
-        % --- end of high priority section ---
-
-        % --- normal priority section ---
-        [{
-            #wp_api_tasks{
-                priority = normal, 
-                status = need_retry, 
-                max_retry = '$2', 
-                retry_count = '$1',
-                _ = '_'
-            }, [
-                {'<','$1',10},
-                {'<','$1','$2'}
-            ], ['$_']
-        }],
-
-        [{
-            #wp_api_tasks{
-                priority = normal, 
-                status = need_retry,
-                request_date = '$3',
-                max_retry = '$2', 
-                retry_count = '$1',
-                _ = '_'
-            }, [
-                {'andalso',
-                    {'>','$1',9},
-                    {'<','$1','$2'}
-                },
-                {'orelse',
-                    {'<','$3',{'-',{const,Time},{'*','$1', Degr_for_incomplete_requests}}},
-                    {'<','$3',{'-',{const,Time},Max_degr_for_incomplete_requests}}
-                }
-            ], ['$_']
-        }],
-
-        [{
-            #wp_api_tasks{
-                priority = normal, 
-                status = new,
-                _ = '_'
-            },
-            [], ['$_']
-        }],
-        % --- end of normal priority section ---
-
-
-        % --- low priority section ---
-        [{
-            #wp_api_tasks{
-                priority = low, 
-                status = need_retry, 
-                max_retry = '$2', 
-                retry_count = '$1',
-                _ = '_'
-            }, [
-                {'<','$1',10},
-                {'<','$1','$2'}
-            ], ['$_']
-        }],
-
-        [{
-            #wp_api_tasks{
-                priority = low, 
-                status = need_retry,
-                request_date = '$3',
-                max_retry = '$2', 
-                retry_count = '$1',
-                _ = '_'
-            }, [
-                {'andalso',
-                    {'>','$1',9},
-                    {'<','$1','$2'}
-                },
-                {'orelse',
-                    {'<','$3',{'-',{const,Time},{'*','$1', Degr_for_incomplete_requests}}},
-                    {'<','$3',{'-',{const,Time},Max_degr_for_incomplete_requests}}
-                }
-            ], ['$_']
-        }],
-
-        [{
-            #wp_api_tasks{
-                priority = low, 
-                status = new,
-                _ = '_'
-            },
-            [], ['$_']
-        }]
-        % --- end of low priority section ---
-    ],
     run_task(State, order_stage, Order).
 
 %% run_task order_stage
 run_task(State = #woodpecker_state{
         api_requests_quota = Api_requests_quota,
         ets = Ets    
-    }, order_stage, [H|T]) ->
+    }, order_stage, [[H|T1]|T2]) ->
     case Api_requests_quota > 0 of
         true ->
             QuotaNew = run_task(State, cast_stage, ets:select(Ets, H)),
-            run_task(State#woodpecker_state{api_requests_quota=QuotaNew}, order_stage, T);
+            run_task(State#woodpecker_state{api_requests_quota=QuotaNew}, order_stage, [T1|T2]);
         false ->
             0
     end;
+run_task(State, order_stage, [[]|T2]) ->
+    run_task(State, order_stage, T2);
 
 %% run_task cast_stage
 run_task(State = #woodpecker_state{
@@ -605,7 +518,9 @@ generate_nofin_topic(_State = #woodpecker_state{
 generate_nofin_topic(State) ->
     State#woodpecker_state.report_topic.
 
-%% send nofin output
+%% send nofin output (when report_nofin_to undefined we do nothing)
+send_nofin_output(_State = #woodpecker_state{report_nofin_to=undefined}, _Frame) ->
+    ok;
 send_nofin_output(_State = #woodpecker_state{
         report_nofin_to=erlroute, 
         report_nofin_topic=Report_Nofin_topic, 
@@ -614,7 +529,6 @@ send_nofin_output(_State = #woodpecker_state{
     erlroute:pub(?MODULE, Server, Report_Nofin_topic, Frame);
 send_nofin_output(_State = #woodpecker_state{report_nofin_to=ReportNofinTo}, Frame) ->
     ReportNofinTo ! Frame.
-
 
 %% send output
 send_output(_State = #woodpecker_state{
