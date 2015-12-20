@@ -2,9 +2,9 @@
 -record(wp_api_tasks, {
 		ref,
 		status,
-		priority,
-		method,
-		url,
+		priority,                                   
+		method,                                     % moderate
+		url,                                        % moderate
 		headers,
 		body,
 		insert_date,
@@ -12,8 +12,15 @@
 		last_response_date,
 		chunked_data,
 		max_retry = 9999,
-		retry_count = 0
+		retry_count = 0,
+        require_receipt
 	}).
+
+-record(woodpecker_frame, {
+        data,
+        recipe_pid,
+        task = #wp_api_tasks{}
+    }).
 
 -record(woodpecker_state, {
         % user specification section

@@ -84,7 +84,7 @@ handle_call(Msg, _From, State) ->
 
 %% create task
 handle_cast({create_task, Method, Priority, Url}, State) ->
-    error_logger:info_msg("Woodpecker got new task"),
+    error_logger:info_msg("Woodpecker got new task: ~p: ~p", [Method,Url]),
     TempRef = erlang:make_ref(),
     ets:insert(State#woodpecker_state.ets, 
         Task = #wp_api_tasks{
@@ -177,10 +177,9 @@ handle_info({gun_data,_ConnPid,ReqRef,nofin,Data}, State) ->
                 last_response_date = get_time(),
                 chunked_data = Chunked
             }),
-            send_nofin_output(State, [
-                    {data, Data},
-                    {send_recipe, self(), ReqRef}
-                ]);
+
+            % chunked output
+            send_nofin_output(State, #woodpecker_frame{data=Chunked, recipe_pid=self(), task=Task});
 
         [] -> error_logger:error_msg("[got_nofin] ReqRef ~p not found in ETS table. Data is ~p", [ReqRef, Data])
     end,
@@ -201,10 +200,7 @@ handle_info({gun_data,_ConnPid,ReqRef,fin,Data}, State) ->
             ),
 
             % final output
-            send_output(State, [
-                    {data, Chunked}, 
-                    {send_recipe, self(), ReqRef}
-                ]);
+            send_output(State, #woodpecker_frame{data=Chunked, recipe_pid=self(), task=Task});
         [] -> error_logger:error_msg("[got_fin] ReqRef ~p not found in ETS table in. Data is ~p", [ReqRef, Data])
     end,
     {noreply, State};
@@ -272,13 +268,13 @@ connect(State, _) ->
 
 %% request
 request(State, Task, undefined) ->
-    error_logger:info_msg("going to update to need_retry"),
+    error_logger:info_msg("going to update task ~p to need_retry", [Task#wp_api_tasks.ref]),
     ets:update_element(State#woodpecker_state.ets, Task#wp_api_tasks.ref, [
             {#wp_api_tasks.status, need_retry}
         ]),
     undefined;
 request(State, Task, GunPid) when Task#wp_api_tasks.method =:= get ->
-    error_logger:info_msg("going to update to processing"),
+    error_logger:info_msg("going to update task ~p to processing", [Task#wp_api_tasks.ref]),
     ReqRef = gun:get(GunPid, Task#wp_api_tasks.url),
     update_request_to_processing(State, Task, ReqRef).
 
@@ -375,28 +371,24 @@ retry_staled_requests(_State = #woodpecker_state{
         end,
         ets:select(Ets, MS)).
 
-%% clean completed requests
+%% clean completed request (match spec)
 clean_completed(Ets,OldThan) ->
-    ets:safe_fixtable(Ets,true),
-    clean_completed(Ets, OldThan, ets:first(Ets)),
-    ets:safe_fixtable(Ets,false).
-clean_completed(_Ets, _OldThan, '$end_of_table') ->
-    true;
-clean_completed(Ets, OldThan, LastKey) ->
-    case ets:lookup(Ets, LastKey) of
-        [Data = #wp_api_tasks{}] when 
-            Data#wp_api_tasks.request_date =/= undefined, 
-            Data#wp_api_tasks.request_date < OldThan, 
-            Data#wp_api_tasks.status=:= complete ->
-                ets:delete(Ets, LastKey),
-                clean_completed(Ets, OldThan,ets:next(Ets, LastKey));
-        [Data = #wp_api_tasks{}] when 
-            Data#wp_api_tasks.request_date =/= undefined, 
-            Data#wp_api_tasks.request_date < OldThan ->
-                clean_completed(Ets, OldThan,ets:next(Ets, LastKey));
-        _ -> 
-            ok
-    end.
+    MS = [{
+            #wp_api_tasks{ref = '$1', status = '$2', request_date = '$3', _ = '_'},
+                [   
+                    {'<', '$3', OldThan},
+                    {'orelse',
+                        {'=:=','$2', complete},
+                        {'=:=','$2', got_fin_data}
+                    }
+                ], ['$1']
+            }],
+%    io:format("MS is ~p~n",[MS]),
+    lists:map(
+        fun(Key) ->
+            ets:delete(Ets, Key)
+        end,
+        ets:select(Ets, MS)).
 
 %% run task from ets-queue
 run_task(State = #woodpecker_state{
@@ -505,7 +497,7 @@ generate_topic(_State = #woodpecker_state{
         report_topic = undefined,
         server = Server
     }) ->
-    list_to_binary(atom_to_list(Server)++".output");
+    list_to_binary(lists:concat([atom_to_list(Server), ".output"]));
 generate_topic(State) ->
     State#woodpecker_state.report_topic.
 
@@ -514,7 +506,7 @@ generate_nofin_topic(_State = #woodpecker_state{
         report_topic = undefined,
         server = Server
     }) ->
-    list_to_binary(atom_to_list(Server)++".nofin_output");
+    list_to_binary(lists:concat([Server, ".nofin_output"]));
 generate_nofin_topic(State) ->
     State#woodpecker_state.report_topic.
 
