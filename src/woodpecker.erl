@@ -43,7 +43,8 @@
 % --------------------------------- gen_server part --------------------------------------
 
 %% start api
-start_link(State) when State#woodpecker_state.server =/= undefined 
+start_link(State) when 
+				State#woodpecker_state.server =/= undefined 
         andalso State#woodpecker_state.connect_to_port =/= undefined
         andalso State#woodpecker_state.connect_to =/= undefined ->
     error_logger:info_msg("Woodpecker start with state ~p",[State]),
@@ -58,8 +59,7 @@ init([State = #woodpecker_state{
         heartbeat_freq = Heartbeat_freq
     }, _Parent]) ->
     Ets = generate_ets_name(Server),
-%    ets:new(Ets, [set, protected, {keypos, #wp_api_tasks.ref}, named_table]),
-    ets:new(Ets, [set, public, {keypos, #wp_api_tasks.ref}, named_table]),
+    _ = ets:new(Ets, [set, protected, {keypos, #wp_api_tasks.ref}, named_table]),
 
     TRef = erlang:send_after(Heartbeat_freq, self(), heartbeat),
 
@@ -140,10 +140,10 @@ handle_info(heartbeat, State = #woodpecker_state{
     Quota = run_task(State#woodpecker_state{api_requests_quota = OldQuota}),
 
     % going to delete completed requests
-    clean_completed(Ets,NewThan),
+    _ = clean_completed(Ets,NewThan),
 
     % going to retry requests with status processing and got_nofin 
-    retry_staled_requests(State),
+    _ = retry_staled_requests(State),
 
     % new heartbeat time refference
     TRef = erlang:send_after(Heartbeat_freq, self(), heartbeat),
@@ -383,7 +383,6 @@ clean_completed(Ets,OldThan) ->
                     }
                 ], ['$1']
             }],
-%    io:format("MS is ~p~n",[MS]),
     lists:map(
         fun(Key) ->
             ets:delete(Ets, Key)
