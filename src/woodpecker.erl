@@ -256,8 +256,9 @@ connect(State = #woodpecker_state{
     error_logger:info_msg("need new connection ~p ~p",[Connect_to,Connect_to_port]),
     {ok, Pid} = gun:open(Connect_to, Connect_to_port, #{retry=>0}),
     case gun:await_up(Pid) of
-        {ok, http} ->
-            GunRef = monitor(process, Pid),
+        {ok, Protocol} ->
+			error_logger:info_msg("Connection oppened with protocol ~p to ~p ~p",[Protocol, Connect_to,Connect_to_port]),
+			GunRef = monitor(process, Pid),
             State#woodpecker_state{gun_pid=Pid, gun_ref=GunRef};
         {error, timeout} ->
             flush_gun(State, Pid)
