@@ -47,7 +47,7 @@ start_link(State) when
 				State#woodpecker_state.server =/= undefined 
         andalso State#woodpecker_state.connect_to_port =/= undefined
         andalso State#woodpecker_state.connect_to =/= undefined ->
-    error_logger:info_msg("Woodpecker start with state ~p",[State]),
+    %error_logger:info_msg("Woodpecker start with state ~p",[State]),
     gen_server:start_link({local, State#woodpecker_state.server}, ?MODULE, [State, self()], []).
 
 % when #erlpusher_state.report_to undefined, we going to send output to parent pid
@@ -84,7 +84,7 @@ handle_call(Msg, _From, State) ->
 
 %% create task
 handle_cast({create_task, Method, Priority, Url}, State) ->
-    error_logger:info_msg("Woodpecker got new task: ~p: ~p", [Method,Url]),
+    %error_logger:info_msg("Woodpecker got new task: ~p: ~p", [Method,Url]),
     TempRef = erlang:make_ref(),
     ets:insert(State#woodpecker_state.ets, 
         Task = #wp_api_tasks{
@@ -167,7 +167,7 @@ handle_info({gun_response,_ConnPid,ReqRef,nofin,200,_Headers}, State) ->
 
 %% gun_data, nofin state
 handle_info({gun_data,_ConnPid,ReqRef,nofin,Data}, State) ->
-    error_logger:info_msg("got data with nofin state for ReqRef ~p",[ReqRef]),
+    %error_logger:info_msg("got data with nofin state for ReqRef ~p",[ReqRef]),
     case ets:lookup(State#woodpecker_state.ets, ReqRef) of
         [Task] -> 
             Chunked = chunk_data(Task#wp_api_tasks.chunked_data, Data),
@@ -187,7 +187,7 @@ handle_info({gun_data,_ConnPid,ReqRef,nofin,Data}, State) ->
 
 %% gun_data, fin state
 handle_info({gun_data,_ConnPid,ReqRef,fin,Data}, State) ->
-    error_logger:info_msg("got data with fin state for ReqRef ~p",[ReqRef]),
+    %error_logger:info_msg("got data with fin state for ReqRef ~p",[ReqRef]),
     case ets:lookup(State#woodpecker_state.ets, ReqRef) of
         [Task] ->
             Chunked = chunk_data(Task#wp_api_tasks.chunked_data, Data),
@@ -253,29 +253,29 @@ connect(State = #woodpecker_state{
         connect_to = Connect_to,
         connect_to_port = Connect_to_port
     }, undefined) ->
-    error_logger:info_msg("need new connection ~p ~p",[Connect_to,Connect_to_port]),
+    %error_logger:info_msg("need new connection ~p ~p",[Connect_to,Connect_to_port]),
     {ok, Pid} = gun:open(Connect_to, Connect_to_port, #{retry=>0}),
     case gun:await_up(Pid) of
-        {ok, Protocol} ->
-			error_logger:info_msg("Connection oppened with protocol ~p to ~p ~p",[Protocol, Connect_to,Connect_to_port]),
+        {ok, _Protocol} ->
+			%error_logger:info_msg("Connection oppened with protocol ~p to ~p ~p",[Protocol, Connect_to,Connect_to_port]),
 			GunRef = monitor(process, Pid),
             State#woodpecker_state{gun_pid=Pid, gun_ref=GunRef};
         {error, timeout} ->
             flush_gun(State, Pid)
     end;
 connect(State, _) ->
-    error_logger:info_msg("we have connection"),
+    %error_logger:info_msg("we have connection"),
     State.
 
 %% request
 request(State, Task, undefined) ->
-    error_logger:info_msg("going to update task ~p to need_retry", [Task#wp_api_tasks.ref]),
+    %error_logger:info_msg("going to update task ~p to need_retry", [Task#wp_api_tasks.ref]),
     ets:update_element(State#woodpecker_state.ets, Task#wp_api_tasks.ref, [
             {#wp_api_tasks.status, need_retry}
         ]),
     undefined;
 request(State, Task, GunPid) when Task#wp_api_tasks.method =:= get ->
-    error_logger:info_msg("going to update task ~p to processing", [Task#wp_api_tasks.ref]),
+    %error_logger:info_msg("going to update task ~p to processing", [Task#wp_api_tasks.ref]),
     ReqRef = gun:get(GunPid, Task#wp_api_tasks.url),
     update_request_to_processing(State, Task, ReqRef).
 
@@ -305,7 +305,7 @@ update_request_to_processing(State, Task, ReqRef) ->
 
 %% gun clean_up
 flush_gun(State, ConnRef) ->
-    error_logger:info_msg("We are in flush gun section with state ~p", [State]),
+    %error_logger:info_msg("We are in flush gun section with state ~p", [State]),
     case ConnRef =:= undefined of
         true when State#woodpecker_state.gun_ref =/= undefined ->
             demonitor(State#woodpecker_state.gun_ref),
