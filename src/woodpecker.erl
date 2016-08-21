@@ -518,7 +518,7 @@ send_nofin_output(_State = #woodpecker_state{
         report_nofin_topic=Report_Nofin_topic, 
         server=Server
     }, Frame) ->
-    erlroute:pub(?MODULE, Server, Report_Nofin_topic, Frame);
+    erlroute:pub(?MODULE, Server, ?LINE, Report_Nofin_topic, Frame);
 send_nofin_output(_State = #woodpecker_state{report_nofin_to=ReportNofinTo}, Frame) ->
     ReportNofinTo ! Frame.
 
@@ -528,7 +528,7 @@ send_output(_State = #woodpecker_state{
         report_topic=Report_topic, 
         server=Server
     }, Frame) ->
-    erlroute:pub(?MODULE, Server, Report_topic, Frame);
+    erlroute:pub(?MODULE, Server, ?LINE, Report_topic, Frame);
 send_output(_State = #woodpecker_state{report_to=ReportTo}, Frame) ->
     ReportTo ! Frame.
 
