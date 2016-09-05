@@ -56,7 +56,8 @@ init([State = #woodpecker_state{report_to = undefined}, Parent]) ->
 
 init([State = #woodpecker_state{
         server = Server, 
-        heartbeat_freq = Heartbeat_freq
+        heartbeat_freq = Heartbeat_freq,
+        requests_allowed_by_api = Requests_allowed_by_api
     }, _Parent]) ->
     Ets = generate_ets_name(Server),
     _ = ets:new(Ets, [set, protected, {keypos, #wp_api_tasks.ref}, named_table]),
@@ -69,7 +70,8 @@ init([State = #woodpecker_state{
             ets = Ets,
             heartbeat_tref = TRef,
             report_topic = generate_topic(State),
-            report_nofin_topic = generate_nofin_topic(State)
+            report_nofin_topic = generate_nofin_topic(State),
+            api_requests_quota = Requests_allowed_by_api
         }}.
 
 %--------------handle_call-----------------
