@@ -27,6 +27,7 @@
         recipe_pid,
         task = #wp_api_tasks{}
     }).
+-type woodpecker_frame() :: #woodpecker_frame{}.
 
 -record(woodpecker_state, {
         % user specification section
