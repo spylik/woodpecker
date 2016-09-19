@@ -71,32 +71,26 @@ tests_with_gun_and_cowboy_test_() ->
     {setup,
         % setup
         fun() ->
-            ToStop = tutils:setup_start([{'apps',[ranch,cowboy,crypto,asn1,public_key,ssl,cowlib,gun]}, {'gservers',[?TESTSERVER]}]),
-            ?TESTMODULE:start_link(#woodpecker_state{server = ?TESTSERVER, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, requests_allowed_by_api=10000})
-                         
-%            CowboyRanchRef = start_cowboy(10),
-    
-%            [{'tostop', ToStop}, {'ranch_ref', CowboyRanchRef}]
+            ToStop = tutils:setup_start([{'apps',[ranch,cowboy,crypto,asn1,public_key,ssl,cowlib,gun]}]),
+            CowboyRanchRef = start_cowboy(10),
+            [{'tostop', ToStop}, {'ranch_ref', CowboyRanchRef}]
         end,
         % cleanup
-%        fun([{'tostop', ToStop},{'ranch_ref', CowboyRanchRef}]) ->
-%            cowboy:stop_listener(CowboyRanchRef),
-%            tutils:cleanup_stop(ToStop)
-%        end, 
+        fun([{'tostop', ToStop},{'ranch_ref', CowboyRanchRef}]) ->
+            cowboy:stop_listener(CowboyRanchRef),
+            tutils:cleanup_stop(ToStop)
+        end, 
         {inorder,
             [
-                {<<"gen_server is started">>,
-                    fun() ->
-                        ?assertEqual(
-                            true,
-                            is_pid(whereis(?TESTSERVER))
-                        )
-                end},
                 {<<"able to send single request with high priority">>,
                     fun() ->
-%                        CowboyPid = start_cowboy(10),
-                        ?TESTMODULE:get(?TESTSERVER,"/",'high')
-%                        cowboy:stop_listener(CowboyPid)
+                        WaitAt = tutils:spawn_wait_loop_max(20),
+                        ?TESTMODULE:start_link(#woodpecker_state{server = ?TESTSERVER, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT}),
+                        ?TESTMODULE:get(?TESTSERVER,"/",'high'),
+                        Acc = tutils:recieve_loop([], 100, WaitAt),
+                        ?debugVal(Acc),
+                        ?TESTMODULE:stop(?TESTSERVER)
+
                 end}
             ]
         }
