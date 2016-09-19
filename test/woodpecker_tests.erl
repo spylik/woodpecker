@@ -3,30 +3,32 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("woodpecker.hrl").
 
+-export([init/2,start_cowboy/1]).
+
 -define(TESTMODULE, woodpecker).
 -define(TESTSERVER, test_wp_server).
 -define(TESTHOST, "127.0.0.1").
--define(TESTPORT, 8080).
+-define(TESTPORT, 8082).
 
 % --------------------------------- fixtures ----------------------------------
 
 % tests for cover standart otp behaviour
 otp_test_() ->
     {setup,
-        fun simple_setup/0    % setup
+        fun() -> error_logger:tty(false) end,
         {inorder,
             [
                 {<<"gen_server able to start via ?TESTSERVER:start_link(#woodpecker_state{})">>,
                     fun() ->
-                        ?TESTSERVER:start_link(woodpecker#{server = test_wp_server}),
+                        ?TESTMODULE:start_link(#woodpecker_state{server = ?TESTSERVER, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT}),
                         ?assertEqual(
                             true,
                             is_pid(whereis(?TESTSERVER))
                         )
                 end},
-                {<<"gen_server able to stop via ?TESTSERVER:stop()">>,
+                {<<"gen_server able to stop via ?TESTSERVER:stop(?TESTSERVER)">>,
                     fun() ->
-                        ?assertEqual(ok, ?TESTSERVER:stop(sync)),
+                        ?assertEqual(ok, ?TESTMODULE:stop('sync',?TESTSERVER)),
                         ?assertEqual(
                             false,
                             is_pid(whereis(?TESTSERVER))
@@ -34,8 +36,8 @@ otp_test_() ->
                 end},
                 {<<"gen_server able to start and stop via ?TESTSERVER:start_link() / ?TESTSERVER:stop(sync)">>,
                     fun() ->
-                        ?TESTSERVER:start_link(),
-                        ?assertEqual(ok, ?TESTSERVER:stop(sync)),
+                        ?TESTMODULE:start_link(#woodpecker_state{server = ?TESTSERVER, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT}),
+                        ?assertEqual(ok, ?TESTMODULE:stop('sync',?TESTSERVER)),
                         ?assertEqual(
                             false,
                             is_pid(whereis(?TESTSERVER))
@@ -43,8 +45,8 @@ otp_test_() ->
                 end},
                 {<<"gen_server able to start and stop via ?TESTSERVER:start_link() / ?TESTSERVER:stop()">>,
                     fun() ->
-                        ?TESTSERVER:start_link(),
-                        ?assertEqual(ok, ?TESTSERVER:stop()),
+                        ?TESTMODULE:start_link(#woodpecker_state{server = ?TESTSERVER, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT}),
+                        ?assertEqual(ok, ?TESTMODULE:stop(?TESTSERVER)),
                         ?assertEqual(
                             false,
                             is_pid(whereis(?TESTSERVER))
@@ -52,8 +54,8 @@ otp_test_() ->
                 end},
                 {<<"gen_server able to start and stop via ?TESTSERVER:start_link() ?TESTSERVER:stop(async)">>,
                     fun() ->
-                        ?TESTSERVER:start_link(),
-                        ?TESTSERVER:stop(async),
+                        ?TESTMODULE:start_link(#woodpecker_state{server = ?TESTSERVER, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT}),
+                        ?TESTMODULE:stop('async',?TESTSERVER),
                         timer:sleep(1), % for async cast
                         ?assertEqual(
                             false,
@@ -65,15 +67,56 @@ otp_test_() ->
         }
     }.
 
+tests_with_gun_and_cowboy_test_() ->
+    {setup,
+        % setup
+        fun() ->
+            ToStop = tutils:setup_start([{'apps',[ranch,cowboy,crypto,asn1,public_key,ssl,cowlib,gun]}, {'gservers',[?TESTSERVER]}]),
+            ?TESTMODULE:start_link(#woodpecker_state{server = ?TESTSERVER, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT})
+                         
+%            CowboyRanchRef = start_cowboy(10),
+    
+%            [{'tostop', ToStop}, {'ranch_ref', CowboyRanchRef}]
+        end,
+        % cleanup
+%        fun([{'tostop', ToStop},{'ranch_ref', CowboyRanchRef}]) ->
+%            cowboy:stop_listener(CowboyRanchRef),
+%            tutils:cleanup_stop(ToStop)
+%        end, 
+        {inorder,
+            [
+                {<<"gen_server is started">>,
+                    fun() ->
+                        ?assertEqual(
+                            true,
+                            is_pid(whereis(?TESTSERVER))
+                        )
+                end},
+                {<<"able to send single request with high priority">>,
+                    fun() ->
+%                        CowboyPid = start_cowboy(10),
+                        ?TESTMODULE:get(?TESTSERVER,"/",'high')
+%                        cowboy:stop_listener(CowboyPid)
+                end}
+            ]
+        }
+    }.
 
-simple_setup() ->
-    error_logger:tty(false),
-%    {ok, Listen} = gen_tcp:listen(0, [Options]),
-%    Port = inet:port(Listen),
-%%    put(socket, Listen),
-%    put(port, Port),
-    ok
+start_cowboy(Acceptors) ->
+    Dispatch = cowboy_router:compile([
+            {'_', [
+                {"/", ?MODULE, []}
+            ]}
+        ]
+    ),
+    {ok, CowboyPid} = cowboy:start_clear(http, Acceptors, [{port, ?TESTPORT}], #{
+        env => #{dispatch => Dispatch}
+    }), CowboyPid.
 
-cleanup(_Data) -> ok.
+init(Req0, Opts) ->
+    Method = cowboy_req:method(Req0),
+    Req = process_req(Method, Req0),
+    {ok, Req, Opts}.
 
-start_server() -> application:ensure_started(?TESTSERVER).
+process_req(_Method, Req) ->
+    cowboy_req:reply(200, #{<<"content-type">> => <<"text/plain; charset=utf-8">>}, <<"ok">>, Req).
