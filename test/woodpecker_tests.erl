@@ -72,7 +72,7 @@ tests_with_gun_and_cowboy_test_() ->
         % setup
         fun() ->
             ToStop = tutils:setup_start([{'apps',[ranch,cowboy,crypto,asn1,public_key,ssl,cowlib,gun]}, {'gservers',[?TESTSERVER]}]),
-            ?TESTMODULE:start_link(#woodpecker_state{server = ?TESTSERVER, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT})
+            ?TESTMODULE:start_link(#woodpecker_state{server = ?TESTSERVER, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, requests_allowed_by_api=10000})
                          
 %            CowboyRanchRef = start_cowboy(10),
     

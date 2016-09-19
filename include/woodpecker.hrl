@@ -55,6 +55,7 @@
         gun_pid :: pid() | 'undefined',                                 % current gun connection Pid
         gun_mon_ref :: reference() | 'undefined',                                         % current gun monitor refference
         api_requests_quota :: integer() | 'undefined',                  % current api requests quota
+        paralell_requests_quota :: integer() | 'undefined',               % current max_paralell_requests
         heartbeat_tref :: reference() | 'undefined'                     % last heartbeat time refference
     }).
 -type woodpecker_state() :: #woodpecker_state{}.

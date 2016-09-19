@@ -92,6 +92,7 @@ init({State = #woodpecker_state{report_to = 'undefined'}, Parent}) ->
 init([State = #woodpecker_state{
         server = Server, 
         heartbeat_freq = Heartbeat_freq,
+        max_paralell_requests = Max_paralell_requests,
         requests_allowed_by_api = Requests_allowed_by_api
     }, _Parent]) ->
     Ets = generate_ets_name(Server),
@@ -106,7 +107,8 @@ init([State = #woodpecker_state{
             heartbeat_tref = TRef,
             report_topic = generate_topic(State),
             report_nofin_topic = generate_nofin_topic(State),
-            api_requests_quota = Requests_allowed_by_api
+            api_requests_quota = Requests_allowed_by_api,
+            paralell_requests_quota = Max_paralell_requests
         }}.
 
 %--------------handle_call-----------------
@@ -176,21 +178,20 @@ handle_info('heartbeat', State = #woodpecker_state{
     % we going to run task
     RequestsInPeriod = requests_in_period(Ets,NewThan),
     OldQuota = Requests_allowed_by_api-RequestsInPeriod,
-    #woodpecker_state{api_requests_quota = Quota} = run_task(State#woodpecker_state{api_requests_quota = OldQuota}),
+    NewState = run_task(State#woodpecker_state{api_requests_quota = OldQuota}),
 
     % going to delete completed requests
     _ = clean_completed(Ets,NewThan),
 
     % going to retry requests with status processing and got_nofin 
-    _ = retry_staled_requests(State),
+    _ = retry_staled_requests(NewState),
 
     % new heartbeat time refference
     TRef = erlang:send_after(Heartbeat_freq, self(), heartbeat),
 
     % return state    
     {noreply, 
-        State#woodpecker_state{
-            api_requests_quota=Quota,
+        NewState#woodpecker_state{
             heartbeat_tref=TRef
         }
     };
@@ -249,14 +250,9 @@ handle_info({recipe, ReqRef, NewStatus}, State) ->
     ets:update_element(State#woodpecker_state.ets, ReqRef, {#wp_api_tasks.status, NewStatus}),
     {noreply, State};
 
-handle_info({'DOWN', ReqRef, 'process', ConnPid, 'normal'}, State) ->
-    error_logger:error_msg("got DOWN for ConnPid ~p, ReqRef ~p with normal Reason",[ConnPid, ReqRef]),
-    ?debug("state is ~p",State),
-    {noreply, State};
-
 %% unexepted 'DOWN'
 handle_info({'DOWN', ReqRef, 'process', ConnPid, Reason}, State) ->
-    error_logger:error_msg("got DOWN for ConnPid ~p, ReqRef ~p with Reason: ~p",[ConnPid, ReqRef, Reason]),
+    ?debug("got DOWN for ConnPid ~p, ReqRef ~p with Reason: ~p",[ConnPid, ReqRef, Reason]),
     ets:update_element(State#woodpecker_state.ets, ReqRef, 
         {#wp_api_tasks.status, need_retry}
     ),
@@ -317,7 +313,6 @@ connect(State) -> State.
 gun_request(Task, State) ->
     update_request_to_processing(State, Task, Task#wp_api_tasks.ref),
     NewState = connect(State),
-    ?debug("state in gun gun_request is ~p",[NewState]),
     request(NewState, Task),
     NewState.
 
@@ -518,15 +513,17 @@ run_task(State, 'order_stage', [[]|T2]) ->
     run_task(State, 'order_stage', T2);
 
 % when tasks list is empty, just return #woodpecker_state.api_requests_quota.
-run_task(State, _Stage, []) ->
-    State;
+run_task(State = #woodpecker_state{
+       max_paralell_requests = Max_paralell_requests
+    }, _Stage, []) ->
+    State#woodpecker_state{paralell_requests_quota = Max_paralell_requests};
 
 % when we do not have free slots
 run_task(State = #woodpecker_state{
         api_requests_quota = Api_requests_quota,
         max_paralell_requests = Max_paralell_requests
-    }, _Stage, _Tasks) when Api_requests_quota =< 0 orelse Max_paralell_requests =< 0 -> 
-    State;
+    }, _Stage, _Tasks) when Api_requests_quota =< 0 orelse paralell_requests_quota =< 0 -> 
+    State#woodpecker_state{paralell_requests_quota = Max_paralell_requests};
 
 % run_task order_stage (when have free slots we able to select tasks with current parameters)
 run_task(State = #woodpecker_state{
@@ -539,12 +536,12 @@ run_task(State = #woodpecker_state{
 %% run_task cast_stage
 run_task(State = #woodpecker_state{
         api_requests_quota = Api_requests_quota,
-        max_paralell_requests = Max_paralell_requests
+        paralell_requests_quota = Paralell_requests_quota
     }, 'cast_stage', [H|T]) when Api_requests_quota > 0 ->
     NewState = gun_request(H, State),
     run_task(NewState#woodpecker_state{
             api_requests_quota = Api_requests_quota - 1, 
-            max_paralell_requests = Max_paralell_requests - 1
+            paralell_requests_quota = Paralell_requests_quota - 1
         }, 'cast_stage', T).
 
 %% generate ETS table name
