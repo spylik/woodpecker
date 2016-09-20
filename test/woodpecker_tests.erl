@@ -87,138 +87,167 @@ tests_with_gun_and_cowboy_test_() ->
         end, 
         {inparallel,
             [
-                {<<"able to send single GET request with urgent priority in single connection">>,
-                    fun() ->
-                        simple_test(get, 'urgent', 1)
-                end},
-                {<<"able to send 2 GET requests with urgent priority in single connection">>,
-                    fun() ->
-                        simple_test(get, 'urgent', 2)
-                end},
-                {<<"able to send single GET request with high priority in single connection">>,
-                    fun() ->
-                        simple_test(get, 'high', 1)
-                end},
-                {<<"able to send 2 GET requests with high priority in single connection">>,
-                    fun() ->
-                        simple_test(get, 'high', 2)
-                end},
-                {<<"able to send single GET request with normal priority in single connection">>,
-                    fun() ->
-                        simple_test(get, 'normal',1)
-                end},
-                {<<"able to send 2 GET requests with normal priority in single connection">>,
-                    fun() ->
-                        simple_test(get, 'normal',2)
-                end},
-                {<<"able to send single GET request with low priority in single connection">>,
-                    fun() ->
-                        simple_test(get, 'low',1)
-                end},
-                {<<"able to send 2 GET requests with low priority in single connection">>,
-                    fun() ->
-                        simple_test(get, 'low', 2)
-                end},
-                {<<"Must ignore max_paralell_requests for urgent priority requests.">>,
+%               {<<"able to send single GET request with urgent priority in single connection">>,
+%                   fun() ->
+%                       simple_test(get, 'urgent', 1)
+%               end},
+%               {<<"able to send 2 GET requests with urgent priority in single connection">>,
+%                   fun() ->
+%                       simple_test(get, 'urgent', 2)
+%               end},
+%               {<<"able to send single GET request with high priority in single connection">>,
+%                   fun() ->
+%                       simple_test(get, 'high', 1)
+%               end},
+%               {<<"able to send 2 GET requests with high priority in single connection">>,
+%                   fun() ->
+%                       simple_test(get, 'high', 2)
+%               end},
+%               {<<"able to send single GET request with normal priority in single connection">>,
+%                   fun() ->
+%                       simple_test(get, 'normal',1)
+%               end},
+%               {<<"able to send 2 GET requests with normal priority in single connection">>,
+%                   fun() ->
+%                       simple_test(get, 'normal',2)
+%               end},
+%               {<<"able to send single GET request with low priority in single connection">>,
+%                   fun() ->
+%                       simple_test(get, 'low',1)
+%               end},
+%               {<<"able to send 2 GET requests with low priority in single connection">>,
+%                   fun() ->
+%                       simple_test(get, 'low', 2)
+%               end},
+%               {<<"Must ignore max_paralell_requests for urgent priority requests.">>,
+%                   fun() ->
+%                       QueryParam = erlang:unique_integer([monotonic,positive]),
+%                       MQParam = integer_to_binary(QueryParam),
+%                       WaitAt = tutils:spawn_wait_loop_max(25,100),
+%                       Server = mlibs:random_atom(),
+%                       Max_paralell_requests = 2,
+%                       ETSTable = woodpecker:generate_ets_name(Server),
+%                       ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, max_paralell_requests = Max_paralell_requests}),
+%                       [?TESTMODULE:get(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'urgent') || _A <- lists:seq(1,15)],
+%                       timer:sleep(20),
+%                       Tasks = ets:tab2list(ETSTable),
+%                       ?assertEqual(15, length(Tasks)),
+%                       Tst = ets:select(ETSTable,[{{wp_api_tasks,'_','_',urgent,'_','_','_','_','_','_','_','_','$2','$1','_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
+%                       ?assertEqual(15, length(Tst)),
+%                       Server ! 'heartbeat',
+%                       [Acc] = tutils:recieve_loop([], 220, WaitAt),
+%                       ?assertEqual(15, length(Acc)),
+%                       FF = hd(Acc),
+%                       FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
+%                       lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
+%                           Data = binary_to_term(DataFrame),
+%                           ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
+%                           ?assertEqual(FirstPid, maps:get(pid, Data))
+%                       end, Acc),
+%                       ?TESTMODULE:stop(Server)
+%               end},
+%               {<<"Must ignore max_paralell_requests for high priority requests.">>,
+%                   fun() ->
+%                       QueryParam = erlang:unique_integer([monotonic,positive]),
+%                       MQParam = integer_to_binary(QueryParam),
+%                       WaitAt = tutils:spawn_wait_loop_max(25,100),
+%                       Server = mlibs:random_atom(),
+%                       Max_paralell_requests = 2,
+%                       ETSTable = woodpecker:generate_ets_name(Server),
+%                       ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, max_paralell_requests = Max_paralell_requests}),
+%                       [?TESTMODULE:get(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'high') || _A <- lists:seq(1,15)],
+%                       timer:sleep(20),
+%                       Tasks = ets:tab2list(ETSTable),
+%                       ?assertEqual(15, length(Tasks)),
+%                       Tst = ets:select(ETSTable,[{{wp_api_tasks,'_','_',high,'_','_','_','_','_','_','_','_','$2','$1','_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
+%                       ?assertEqual(15, length(Tst)),
+%                       Server ! 'heartbeat',
+%                       [Acc] = tutils:recieve_loop([], 220, WaitAt),
+%                       ?assertEqual(15, length(Acc)),
+%                       FF = hd(Acc),
+%                       FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
+%                       lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
+%                           Data = binary_to_term(DataFrame),
+%                           ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
+%                           ?assertEqual(FirstPid, maps:get(pid, Data))
+%                       end, Acc),
+%                       ?TESTMODULE:stop(Server)
+%               end},
+%               {<<"Must respect max_paralell_requests for normal priority requests">>,
+%                   fun() ->
+%                       QueryParam = erlang:unique_integer([monotonic,positive]),
+%                       MQParam = integer_to_binary(QueryParam),
+%                       WaitAt = tutils:spawn_wait_loop_max(10,100),
+%                       Server = mlibs:random_atom(),
+%                       Max_paralell_requests = 2,
+%                       ETSTable = woodpecker:generate_ets_name(Server),
+%                       ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, max_paralell_requests = Max_paralell_requests}),
+%                       [?TESTMODULE:get(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'normal') || _A <- lists:seq(1,20)],
+%                       timer:sleep(20),
+%                       Tasks = ets:tab2list(ETSTable),
+%                       ?assertEqual(20, length(Tasks)),
+%                       Tst = ets:select(ETSTable,[{{wp_api_tasks,'_',new,normal,'_','_','_','_','_','_','_','_','$2','$1','_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
+%                       ?assertEqual(20, length(Tst)),
+%                       Server ! 'heartbeat',
+%                       [Acc] = tutils:recieve_loop([], 220, WaitAt),
+%                       ?TESTMODULE:stop(Server),
+%                       ?assertEqual(Max_paralell_requests, length(Acc)),
+%                       FF = hd(Acc),
+%                       FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
+%                       lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
+%                           Data = binary_to_term(DataFrame),
+%                           ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
+%                           ?assertEqual(FirstPid, maps:get(pid, Data))
+%                       end, Acc)
+%               end},
+%               {<<"Must respect max_paralell_requests for low priority requests">>,
+%                   fun() ->
+%                       QueryParam = erlang:unique_integer([monotonic,positive]),
+%                       MQParam = integer_to_binary(QueryParam),
+%                       WaitAt = tutils:spawn_wait_loop_max(10,100),
+%                       Server = mlibs:random_atom(),
+%                       Max_paralell_requests = 2,
+%                       ETSTable = woodpecker:generate_ets_name(Server),
+%                       ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, max_paralell_requests = Max_paralell_requests}),
+%                       [?TESTMODULE:get(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'low') || _A <- lists:seq(1,20)],
+%                       timer:sleep(20),
+%                       Tasks = ets:tab2list(ETSTable),
+%                       ?assertEqual(20, length(Tasks)),
+%                       Tst = ets:select(ETSTable,[{{wp_api_tasks,'_',new,low,'_','_','_','_','_','_','_','_','$2','$1','_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
+%                       ?assertEqual(20, length(Tst)),
+%                       Server ! 'heartbeat',
+%                       [Acc] = tutils:recieve_loop([], 220, WaitAt),
+%                       ?TESTMODULE:stop(Server),
+%                       ?assertEqual(Max_paralell_requests, length(Acc)),
+%                       FF = hd(Acc),
+%                       FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
+%                       lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
+%                           Data = binary_to_term(DataFrame),
+%                           ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
+%                           ?assertEqual(FirstPid, maps:get(pid, Data))
+%                       end, Acc)
+%               end}
+                {<<"Must respect requests_allowed_by_api/requests_allowed_in_period for high priority requests">>,
                     fun() ->
                         QueryParam = erlang:unique_integer([monotonic,positive]),
                         MQParam = integer_to_binary(QueryParam),
-                        WaitAt = tutils:spawn_wait_loop_max(25,100),
+                        WaitAt = tutils:spawn_wait_loop_max(10,100),
                         Server = mlibs:random_atom(),
-                        Max_paralell_requests = 2,
+                        Requests_allowed_by_api = 1,
+                        Requests_allowed_in_period = 10000,
+                        SendReq = 10,
                         ETSTable = woodpecker:generate_ets_name(Server),
-                        ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, max_paralell_requests = Max_paralell_requests}),
-                        [?TESTMODULE:get(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'urgent') || _A <- lists:seq(1,15)],
+                        ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, requests_allowed_in_period = Requests_allowed_in_period, requests_allowed_by_api = Requests_allowed_by_api}),
+                        [?TESTMODULE:get(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'high') || _A <- lists:seq(1,SendReq)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
-                        ?assertEqual(15, length(Tasks)),
-                        Tst = ets:select(ETSTable,[{{wp_api_tasks,'_','_',urgent,'_','_','_','_','_','_','_','_','$2','$1','_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
-                        ?assertEqual(15, length(Tst)),
-                        Server ! 'heartbeat',
-                        [Acc] = tutils:recieve_loop([], 220, WaitAt),
-                        ?assertEqual(15, length(Acc)),
-                        FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
-                        lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
-                            Data = binary_to_term(DataFrame),
-                            ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
-                            ?assertEqual(FirstPid, maps:get(pid, Data))
-                        end, Acc),
-                        ?TESTMODULE:stop(Server)
-                end},
-                {<<"Must ignore max_paralell_requests for high priority requests.">>,
-                    fun() ->
-                        QueryParam = erlang:unique_integer([monotonic,positive]),
-                        MQParam = integer_to_binary(QueryParam),
-                        WaitAt = tutils:spawn_wait_loop_max(25,100),
-                        Server = mlibs:random_atom(),
-                        Max_paralell_requests = 2,
-                        ETSTable = woodpecker:generate_ets_name(Server),
-                        ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, max_paralell_requests = Max_paralell_requests}),
-                        [?TESTMODULE:get(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'high') || _A <- lists:seq(1,15)],
-                        timer:sleep(20),
-                        Tasks = ets:tab2list(ETSTable),
-                        ?assertEqual(15, length(Tasks)),
+                        ?assertEqual(SendReq, length(Tasks)),
                         Tst = ets:select(ETSTable,[{{wp_api_tasks,'_','_',high,'_','_','_','_','_','_','_','_','$2','$1','_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
-                        ?assertEqual(15, length(Tst)),
-                        Server ! 'heartbeat',
-                        [Acc] = tutils:recieve_loop([], 220, WaitAt),
-                        ?assertEqual(15, length(Acc)),
-                        FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
-                        lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
-                            Data = binary_to_term(DataFrame),
-                            ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
-                            ?assertEqual(FirstPid, maps:get(pid, Data))
-                        end, Acc),
-                        ?TESTMODULE:stop(Server)
-                end},
-                {<<"Must respect max_paralell_requests for normal priority requests">>,
-                    fun() ->
-                        QueryParam = erlang:unique_integer([monotonic,positive]),
-                        MQParam = integer_to_binary(QueryParam),
-                        WaitAt = tutils:spawn_wait_loop_max(10,100),
-                        Server = mlibs:random_atom(),
-                        Max_paralell_requests = 2,
-                        ETSTable = woodpecker:generate_ets_name(Server),
-                        ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, max_paralell_requests = Max_paralell_requests}),
-                        [?TESTMODULE:get(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'normal') || _A <- lists:seq(1,20)],
-                        timer:sleep(20),
-                        Tasks = ets:tab2list(ETSTable),
-                        ?assertEqual(20, length(Tasks)),
-                        Tst = ets:select(ETSTable,[{{wp_api_tasks,'_',new,normal,'_','_','_','_','_','_','_','_','$2','$1','_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
-                        ?assertEqual(20, length(Tst)),
-                        Server ! 'heartbeat',
+                        ?assertEqual(SendReq, length(Tst)),
+%                        Server ! 'heartbeat',
                         [Acc] = tutils:recieve_loop([], 220, WaitAt),
                         ?TESTMODULE:stop(Server),
-                        ?assertEqual(Max_paralell_requests, length(Acc)),
-                        FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
-                        lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
-                            Data = binary_to_term(DataFrame),
-                            ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
-                            ?assertEqual(FirstPid, maps:get(pid, Data))
-                        end, Acc)
-                end},
-                {<<"Must respect max_paralell_requests for low priority requests">>,
-                    fun() ->
-                        QueryParam = erlang:unique_integer([monotonic,positive]),
-                        MQParam = integer_to_binary(QueryParam),
-                        WaitAt = tutils:spawn_wait_loop_max(10,100),
-                        Server = mlibs:random_atom(),
-                        Max_paralell_requests = 2,
-                        ETSTable = woodpecker:generate_ets_name(Server),
-                        ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, max_paralell_requests = Max_paralell_requests}),
-                        [?TESTMODULE:get(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'low') || _A <- lists:seq(1,20)],
-                        timer:sleep(20),
-                        Tasks = ets:tab2list(ETSTable),
-                        ?assertEqual(20, length(Tasks)),
-                        Tst = ets:select(ETSTable,[{{wp_api_tasks,'_',new,low,'_','_','_','_','_','_','_','_','$2','$1','_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
-                        ?assertEqual(20, length(Tst)),
-                        Server ! 'heartbeat',
-                        [Acc] = tutils:recieve_loop([], 220, WaitAt),
-                        ?TESTMODULE:stop(Server),
-                        ?assertEqual(Max_paralell_requests, length(Acc)),
+                        ?assertEqual(Requests_allowed_by_api, length(Acc)),
                         FF = hd(Acc),
                         FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
                         lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
@@ -227,6 +256,7 @@ tests_with_gun_and_cowboy_test_() ->
                             ?assertEqual(FirstPid, maps:get(pid, Data))
                         end, Acc)
                 end}
+
             ]
         }
     }.
