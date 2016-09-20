@@ -10,20 +10,20 @@
 -type newtaskmsg()  :: {'create_task', method(), priority(), url()}.
 
 -record(wp_api_tasks, {
-        ref                 :: reference() | mspec(),
-        status              :: status() | mspec(),
-        priority            :: priority() | mspec(),
-        method              :: method() | mspec(),            % moderate
-        url                 :: url() | mspec(),     % moderate
-        headers             :: mspec(),
-        body                :: mspec(),
-        insert_date         :: pos_integer() | mspec(),
-        request_date        :: pos_integer() | mspec(),
-        last_response_date  :: pos_integer() | mspec(),
-        chunked_data        :: binary() | mspec(),
-        max_retry = 9999    :: non_neg_integer() | mspec(),
-        retry_count = 0     :: non_neg_integer() | mspec(),
-        require_receipt     :: mspec()
+        ref                     :: reference() | mspec(),
+        status = 'new'          :: status() | mspec(),
+        priority = 'low'        :: priority() | mspec(),
+        method                  :: method() | mspec(),            % moderate
+        url                     :: url() | mspec(),     % moderate
+        headers                 :: binary() | mspec(),
+        body                    :: binary() | mspec(),
+        insert_date             :: pos_integer() | mspec(),
+        request_date            :: pos_integer() | mspec(),
+        last_response_date      :: 'undefined' | pos_integer() | mspec(),
+        chunked_data            :: 'undefined' | binary() | mspec(),
+        max_retry = 9999        :: non_neg_integer() | mspec(),
+        retry_count = 0         :: non_neg_integer() | mspec(),
+        require_receipt = false :: mspec()
     }).
 
 -record(woodpecker_frame, {
@@ -59,5 +59,3 @@
         heartbeat_tref :: reference() | 'undefined'                     % last heartbeat time refference
     }).
 -type woodpecker_state() :: #woodpecker_state{}.
-
-
