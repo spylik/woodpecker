@@ -6,9 +6,20 @@
 -type mspec()       :: '_' | '$1' | '$2' | '$3' | '$4' | '$5'.
 -type server()      :: pid() | atom().
 -type url()         :: nonempty_list().
+-type isFin()       :: 'fin' | 'nofin'.
 -type stage()       :: 'order_stage' | 'cast_stage'.
 -type newtaskmsg()  :: {'create_task', method(), priority(), url(), headers(), iodata()}.
 -type headers()     :: 'undefined' | [{binary(), iodata()}].
+-type httpstatus()  :: 100..999.
+-type stream_ref()  :: reference().
+-type gun_pid()     :: pid().
+-type mon_ref()     :: reference().
+
+-type gun_response()    :: {'gun_response', gun_pid(), stream_ref(), isFin(), httpstatus(), headers()}.
+-type gun_data()        :: {'gun_data', gun_pid(), stream_ref(), isFin(), binary()}.
+-type gun_push()        :: {'gun_push', gun_pid(), stream_ref(), stream_ref(), method(), nonempty_list(), nonempty_list(), headers()}.
+-type gun_error()       :: {'gun_error', gun_pid(), stream_ref(), term()} | {'gun_error', gun_pid(), term()}.
+-type down()            :: {'DOWN', mon_ref(), 'process', stream_ref(), term()}. 
 
 -record(wp_api_tasks, {
         ref                     :: reference() | mspec(),
@@ -17,7 +28,7 @@
         method                  :: method() | mspec(),            % moderate
         url                     :: url() | mspec(),     % moderate
         headers                 :: headers() | mspec(),
-        body                    :: binary() | mspec(),
+        body                    :: 'undefined' | binary() | mspec(),
         insert_date             :: pos_integer() | mspec(),
         request_date            :: 'undefined' | pos_integer() | mspec(),
         last_response_date      :: 'undefined' | pos_integer() | mspec(),

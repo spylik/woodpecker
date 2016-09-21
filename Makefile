@@ -3,7 +3,7 @@ PROJECT = woodpecker
 TEST_ERLC_OPTS += +warn_export_vars +warn_shadow_vars +warn_obsolete_guard +debug_info
 TEST_ERLC_OPTS += +'{parse_transform, lager_transform}'
 
-ERLC_OPTS += +warn_export_vars +warn_shadow_vars +warn_obsolete_guard +warn_missing_spec #-Werror
+#ERLC_OPTS += +warn_export_vars +warn_shadow_vars +warn_obsolete_guard +warn_missing_spec #-Werror
 
 # our deps
 dep_teaser = git https://github.com/spylik/teaser master

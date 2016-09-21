@@ -139,7 +139,7 @@ handle_call(Msg, _From, State) ->
     State   :: woodpecker_state(),
     Result  :: {noreply, State} | {stop, normal, State}.
 
-%% create task
+% @doc create task
 handle_cast({'create_task', Method, Priority, Url, Headers, Body}, State) ->
     TempRef = erlang:make_ref(),
     ets:insert(State#woodpecker_state.ets, 
@@ -167,11 +167,11 @@ handle_cast({'create_task', Method, Priority, Url, Headers, Body}, State) ->
     ?here,
     {noreply, NewState};
 
-% handle_cast for stop
+% @doc handle_cast for stop
 handle_cast(stop, State) ->
     {stop, normal, State};
 
-% handle_cast for undexepted things
+% @doc handle_cast for undexepted things
 handle_cast(Msg, State) ->
     error_logger:warning_msg("we are in undefined handle cast with message ~p~n",[Msg]),
     {noreply, State}.
@@ -182,7 +182,7 @@ handle_cast(Msg, State) ->
 
 % @doc callbacks for gen_server handle_info.
 -spec handle_info(Message, State) -> Result when
-    Message :: term(),
+    Message :: 'heartbeat' | gun_response() | gun_data() | gun_push() | gun_error() | down(),
     State   :: term(),
     Result  :: {noreply, State}.
 
@@ -190,6 +190,7 @@ handle_cast(Msg, State) ->
 handle_info('heartbeat', State = #woodpecker_state{
         heartbeat_tref = Heartbeat_tref, 
         requests_allowed_in_period = Requests_allowed_in_period,
+        max_paralell_requests = Max_paralell_requests,
         ets = Ets,
         heartbeat_freq = Heartbeat_freq
     }) ->
@@ -199,7 +200,10 @@ handle_info('heartbeat', State = #woodpecker_state{
     OldQuota = get_quota(State, NewThan),
     
     % going to run task if have quota
-    NewState = run_task(State#woodpecker_state{api_requests_quota = OldQuota}, 'order_stage', prepare_ms(State)),
+    NewState = run_task(State#woodpecker_state{
+            api_requests_quota = OldQuota, 
+            paralell_requests_quota = Max_paralell_requests-active_requests(Ets)
+        }, 'order_stage', prepare_ms(State)),
 
     % going to delete completed requests
     _ = clean_completed(Ets,NewThan),
@@ -267,29 +271,32 @@ handle_info({'gun_data',_ConnPid,ReqRef,'fin',Data}, State) ->
     end,
     {noreply, State};
 
-%% unexepted 'DOWN'
-handle_info({'DOWN', ReqRef, 'process', ConnPid, Reason}, State) ->
-    ?debug("got DOWN for ConnPid ~p, ReqRef ~p with Reason: ~p",[ConnPid, ReqRef, Reason]),
+% @doc gun_error with ReqRef
+handle_info({'gun_error', ConnPid, ReqRef, {Reason, Descr}}, State) ->
+    error_logger:error_msg("got gun_error for ConnPid ~p, ReqRef ~p with reason: {~p, ~p}",[ConnPid, ReqRef, Reason, Descr]),
     ets:update_element(State#woodpecker_state.ets, ReqRef, 
         {#wp_api_tasks.status, 'need_retry'}
     ),
     NewState = flush_gun(State, ConnPid),
     {noreply, NewState};
 
-%% gun_error
-handle_info({'gun_error', ConnPid, ReqRef, {Reason,Descr}}, State) ->
-    error_logger:error_msg("got gun_error for ConnPid ~p, ReqRef ~p with reason: ~p, ~p",[ConnPid, ReqRef, Reason, Descr]),
-    ets:update_element(State#woodpecker_state.ets, ReqRef, 
-        {#wp_api_tasks.status, 'need_retry'}
-    ),
+%% @doc gun_error
+handle_info({'gun_error', ConnPid, {Reason, Descr}}, State) ->
+    error_logger:error_msg("got gun_error for ConnPid ~p with reason: {~p, ~p}",[ConnPid, Reason, Descr]),
     NewState = flush_gun(State, ConnPid),
     {noreply, NewState};
 
 %% gun_down
 handle_info({'gun_down',ConnPid,_,_,_,_}, State) ->
     error_logger:info_msg("got gun_down for ConnPid ~p",[ConnPid]),
-%    NewState = flush_gun(State, ConnPid),
-    {noreply, State};
+    NewState = flush_gun(State, ConnPid),
+    {noreply, NewState};
+
+%% unexepted 'DOWN'
+handle_info({'DOWN', MonRef, 'process', ConnPid, Reason}, State) ->
+    error_logger:error_msg("got DOWN for ConnPid ~p, MonRef ~p with Reason: ~p",[ConnPid, MonRef, Reason]),
+    NewState = flush_gun(State, ConnPid),
+    {noreply, NewState};
 
 %% handle_info for all other thigs
 handle_info(Msg, State) ->
@@ -433,20 +440,31 @@ requests_in_period(Ets, DateFrom) ->
             #wp_api_tasks{status = '$2', last_response_date = '$1', request_date = '$3', _ = '_'},
                 [
                     {'orelse',
-                        {'and',
-                            {'and',
-                                {'>','$1',{const,DateFrom}},
-                                {'=/=','$1','undefined'}
-                            },
+                        {'andalso',
+                            {'>','$1',{const,DateFrom}},
+                            {'=/=','$1','undefined'},
                             {'=/=','$2','need_retry'}
                         },    
-                        {'and', 
-                            {'and',
-                                {'>','$3',{const,DateFrom}},
-                                {'=/=','$3','undefined'}
-                            },
+                        {'andalso', 
+                            {'>','$3',{const,DateFrom}},
+                            {'=/=','$3','undefined'},
                             {'=:=','$2','processing'}
                         }
+                    }
+                ],
+                [true]
+            }
+        ],
+    ets:select_count(Ets, MS).
+
+active_requests(Ets) ->
+    MS = [{
+            #wp_api_tasks{status = '$1', _ = '_'},
+                [
+                    {'orelse',
+                        {'=:=','$1','processing'},
+                        {'=:=','$1','got_gun_response'},
+                        {'=:=','$1','got_nofin_data'}
                     }
                 ],
                 [true]
@@ -582,9 +600,10 @@ run_task(State, 'order_stage', [[]|T2]) ->
 
 % when tasks list is empty, just return #woodpecker_state.api_requests_quota.
 run_task(State = #woodpecker_state{
-       max_paralell_requests = Max_paralell_requests
+       max_paralell_requests = Max_paralell_requests,
+       ets = Ets
     }, _Stage, []) ->
-    State#woodpecker_state{paralell_requests_quota = Max_paralell_requests};
+    State#woodpecker_state{paralell_requests_quota = Max_paralell_requests - active_requests(Ets)};
 
 % when we do not have free slots
 run_task(State = #woodpecker_state{
