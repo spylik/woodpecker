@@ -370,7 +370,6 @@ tests_with_gun_and_cowboy_test_() ->
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(SendReq, length(Tasks)),
-
                         Tst = ets:select(ETSTable,[{#wp_api_tasks{status = 'new', priority = 'low',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
                         ?assertEqual(SendReq, length(Tst)),
                          Server ! 'heartbeat',

@@ -303,7 +303,7 @@ handle_info(Msg, State) ->
     State :: term().
 
 terminate(_Reason, State) ->
-    flush_gun(State, undefined),
+    _ = flush_gun(State, undefined),
     _ = erlang:cancel_timer(State#woodpecker_state.heartbeat_tref).
 
 % @doc call back for code_change
@@ -573,7 +573,7 @@ prepare_ms(#woodpecker_state{
 -spec run_task(State, Stage, Tasks) -> Result when
     State   :: woodpecker_state(),
     Stage   :: stage(),
-    Tasks   :: [ets:match_spec()],
+    Tasks   :: [[ets:match_spec()]],
     Result  :: woodpecker_state().
 
 % when head is empty going to check tail
