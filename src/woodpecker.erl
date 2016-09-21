@@ -117,6 +117,14 @@ init({State = #woodpecker_state{
 
 %--------------handle_call-----------------
 
+% @doc callbacks for gen_server handle_call.
+-spec handle_call(Message, From, State) -> Result when
+    Message :: term(),
+    From :: {pid(), Tag},
+    Tag :: term(),
+    State :: term(),
+    Result :: {reply, Result, State}.
+
 %% handle_call for all other thigs
 handle_call(Msg, _From, State) ->
     error_logger:warning_msg("we are in undefined handle_call with message ~p~n",[Msg]),
@@ -154,13 +162,14 @@ handle_cast({'create_task', Method, Priority, Url}, State) ->
         _ ->
             State
     end,
+    ?here,
     {noreply, NewState};
 
 % handle_cast for stop
 handle_cast(stop, State) ->
     {stop, normal, State};
 
-%% handle_cast for all other thigs
+% handle_cast for all other thigs
 handle_cast(Msg, State) ->
     error_logger:warning_msg("we are in undefined handle cast with message ~p~n",[Msg]),
     {noreply, State}.
@@ -168,6 +177,12 @@ handle_cast(Msg, State) ->
 
 
 %--------------handle_info-----------------
+
+% @doc callbacks for gen_server handle_info.
+-spec handle_info(Message, State) -> Result when
+    Message :: term(),
+    State   :: term(),
+    Result  :: {noreply, State}.
 
 %% heartbeat
 handle_info('heartbeat', State = #woodpecker_state{
@@ -201,7 +216,7 @@ handle_info('heartbeat', State = #woodpecker_state{
     };
 
 %% gun_response, nofin state
-handle_info({gun_response,_ConnPid,ReqRef,nofin,200,_Headers}, State) ->
+handle_info({'gun_response',_ConnPid,ReqRef,nofin,200,_Headers}, State) ->
     ?warning("got gun_response ~p",[gun_response]),
     ets:update_element(
         State#woodpecker_state.ets, ReqRef, [
@@ -211,7 +226,7 @@ handle_info({gun_response,_ConnPid,ReqRef,nofin,200,_Headers}, State) ->
     {noreply, State};
 
 %% gun_data, nofin state
-handle_info({gun_data,_ConnPid,ReqRef,nofin,Data}, State) ->
+handle_info({'gun_data',_ConnPid,ReqRef,'nofin',Data}, State) ->
     %error_logger:info_msg("got data with nofin state for ReqRef ~p",[ReqRef]),
     case ets:lookup(State#woodpecker_state.ets, ReqRef) of
         [Task] -> 
@@ -231,7 +246,7 @@ handle_info({gun_data,_ConnPid,ReqRef,nofin,Data}, State) ->
     {noreply, State};
 
 %% gun_data, fin state
-handle_info({gun_data,_ConnPid,ReqRef,fin,Data}, State) ->
+handle_info({'gun_data',_ConnPid,ReqRef,'fin',Data}, State) ->
     %error_logger:info_msg("got data with fin state for ReqRef ~p",[ReqRef]),
     case ets:lookup(State#woodpecker_state.ets, ReqRef) of
         [Task] ->
@@ -251,7 +266,7 @@ handle_info({gun_data,_ConnPid,ReqRef,fin,Data}, State) ->
     {noreply, State};
 
 %% got recipe
-handle_info({recipe, ReqRef, NewStatus}, State) ->
+handle_info({'recipe', ReqRef, NewStatus}, State) ->
     ets:update_element(State#woodpecker_state.ets, ReqRef, {#wp_api_tasks.status, NewStatus}),
     {noreply, State};
 
@@ -285,9 +300,23 @@ handle_info(Msg, State) ->
     {noreply, State}.
 %-----------end of handle_info-------------
 
+% @doc call back for terminate (we going to cancel timer here)
+-spec terminate(Reason, State) -> term() when
+    Reason :: 'normal' | 'shutdown' | {'shutdown',term()} | term(),
+    State :: term().
+
 terminate(_Reason, State) ->
     flush_gun(State, undefined),
     _ = erlang:cancel_timer(State#woodpecker_state.heartbeat_tref).
+
+% @doc call back for code_change
+-spec code_change(OldVsn, State, Extra) -> Result when
+    OldVsn :: Vsn | {down, Vsn},
+    Vsn :: term(),
+    State :: term(),
+    Extra :: term(),
+    Result :: {ok, NewState},
+    NewState :: term().
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -404,9 +433,17 @@ requests_in_period(Ets, DateFrom) ->
     MS = [{
             #wp_api_tasks{status = '$2', last_response_date = '$1', _ = '_'},
                 [
-                    {'=/=','$2','need_retry'},
-                    {'=/=','$1','undefined'},
-                    {'>','$1',{const,DateFrom}}
+                    {'orelse',
+                        {'and',
+                            {'and',
+                                {'=/=','$2','need_retry'},
+                                {'>','$1',{const,DateFrom}},
+                                {'=/=','$1','undefined'}
+                            },
+                            {'=/=','$2','need_retry'}
+                        },    
+                        {'=:=','$2','processing'}
+                    }
                 ],
                 [true]
             }

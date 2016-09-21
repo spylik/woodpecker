@@ -8,6 +8,7 @@
 -type url()         :: nonempty_list().
 -type stage()       :: 'order_stage' | 'cast_stage'.
 -type newtaskmsg()  :: {'create_task', method(), priority(), url()}.
+-type headers()     :: [{binary(), iodata()}].
 
 -record(wp_api_tasks, {
         ref                     :: reference() | mspec(),
@@ -15,7 +16,7 @@
         priority = 'low'        :: priority() | mspec(),
         method                  :: method() | mspec(),            % moderate
         url                     :: url() | mspec(),     % moderate
-        headers                 :: binary() | mspec(),
+        headers                 :: headers() | mspec(),
         body                    :: binary() | mspec(),
         insert_date             :: pos_integer() | mspec(),
         request_date            :: pos_integer() | mspec(),
