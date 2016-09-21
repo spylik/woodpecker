@@ -45,8 +45,8 @@
         stop/2,
         get_topic/1,
         get_nofin_topic/1,
-        get/2,
-        get/3
+        async_get/2,
+        async_get/3
     ]).
 
 % --------------------------------- gen_server part --------------------------------------
@@ -140,7 +140,7 @@ handle_call(Msg, _From, State) ->
     Result  :: {noreply, State} | {stop, normal, State}.
 
 %% create task
-handle_cast({'create_task', Method, Priority, Url}, State) ->
+handle_cast({'create_task', Method, Priority, Url, Headers, Body}, State) ->
     TempRef = erlang:make_ref(),
     ets:insert(State#woodpecker_state.ets, 
         Task = #wp_api_tasks{
@@ -149,7 +149,9 @@ handle_cast({'create_task', Method, Priority, Url}, State) ->
             priority = Priority,
             method = Method,
             url = Url,
-            insert_date = get_time()
+            insert_date = get_time(),
+            headers = Headers,
+            body = Body
         }),
     Quota = get_quota(State),
     ?debug(State),
@@ -169,7 +171,7 @@ handle_cast({'create_task', Method, Priority, Url}, State) ->
 handle_cast(stop, State) ->
     {stop, normal, State};
 
-% handle_cast for all other thigs
+% handle_cast for undexepted things
 handle_cast(Msg, State) ->
     error_logger:warning_msg("we are in undefined handle cast with message ~p~n",[Msg]),
     {noreply, State}.
@@ -379,8 +381,11 @@ request(#woodpecker_state{
         gun_pid = GunPid, 
         api_requests_quota = Api_requests_quota,
         paralell_requests_quota = Paralell_requests_quota
-    } = State, #wp_api_tasks{method = 'get'} = Task) ->
-    ReqRef = gun:get(GunPid, Task#wp_api_tasks.url),
+    } = State, #wp_api_tasks{method = 'get', url = Url, headers = Headers} = Task) ->
+    ReqRef = case Headers of 
+        'undefined' -> gun:get(GunPid, Url);
+        _ -> gun:get(GunPid, Url, Headers)
+    end,
     update_request_to_processing(State, Task, ReqRef),
     State#woodpecker_state{api_requests_quota = Api_requests_quota-1, paralell_requests_quota = Paralell_requests_quota-1}.
 
@@ -391,7 +396,6 @@ chunk_data(OldData, NewData) ->
     <<OldData/binary, NewData/binary>>.
 
 % @doc update request in ets to processing
-update_request_to_processing(_, _, 'undefined') -> 'undefined';
 update_request_to_processing(State, Task, ReqRef) ->
     case Task#wp_api_tasks.ref =/= ReqRef of
         true ->
@@ -678,19 +682,28 @@ get_nofin_topic(Server) ->
 get_topic(Server) ->
     gen_server:call(Server, 'get_topic').
 
-% @doc ask woodpecker to GET data from Url with default 'low' priority
--spec get(Server, Url) -> 'ok' when
+% @doc ask woodpecker to async GET data from Url with default 'low' priority
+-spec async_get(Server, Url) -> 'ok' when
     Server  :: server(),
     Url     :: url().
 
-get(Server, Url) ->
-    get(Server, Url, 'low').
+async_get(Server, Url) ->
+    async_get(Server, Url, 'low').
 
-% @doc ask woodpecker to GET data from Url with default 'low' priority
--spec get(Server, Url, Proprity) -> 'ok' when
+% @doc ask woodpecker to async GET data from Url with default 'low' priority empty headers
+-spec async_get(Server, Url, Priority) -> 'ok' when
     Server      :: server(),
     Url         :: url(),
-    Proprity    :: priority().
+    Priority    :: priority().
 
-get(Server, Url, Proprity) ->
-    gen_server:cast(Server, {create_task,get,Proprity,Url}).
+async_get(Server, Url, Priority) -> 
+    async_get(Server, Url, Priority, 'undefined').
+
+% @doc ask woodpecker to async GET data from Url (body must be always empty for GET requsts)
+-spec async_get(Server, Url, Priority, Headers) -> 'ok' when
+    Server      :: server(),
+    Url         :: url(),
+    Headers     :: headers(),
+    Priority    :: priority().
+async_get(Server, Url, Priority, Headers) ->
+    gen_server:cast(Server, {create_task, get, Priority, Url, Headers, 'undefined'}).

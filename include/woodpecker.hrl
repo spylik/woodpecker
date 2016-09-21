@@ -7,8 +7,8 @@
 -type server()      :: pid() | atom().
 -type url()         :: nonempty_list().
 -type stage()       :: 'order_stage' | 'cast_stage'.
--type newtaskmsg()  :: {'create_task', method(), priority(), url()}.
--type headers()     :: [{binary(), iodata()}].
+-type newtaskmsg()  :: {'create_task', method(), priority(), url(), headers(), iodata()}.
+-type headers()     :: 'undefined' | [{binary(), iodata()}].
 
 -record(wp_api_tasks, {
         ref                     :: reference() | mspec(),
