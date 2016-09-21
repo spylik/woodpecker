@@ -241,7 +241,7 @@ handle_info({'gun_data',_ConnPid,ReqRef,'nofin',Data}, State) ->
             }),
 
             % chunked output
-            send_nofin_output(State, #woodpecker_frame{data=Chunked, recipe_pid=self(), task=Task});
+            send_nofin_output(State, #woodpecker_frame{data=Chunked, task=Task});
 
         [] -> error_logger:error_msg("[got_nofin] ReqRef ~p not found in ETS table. Data is ~p", [ReqRef, Data])
     end,
@@ -262,14 +262,9 @@ handle_info({'gun_data',_ConnPid,ReqRef,'fin',Data}, State) ->
             ),
 
             % final output
-            send_output(State, #woodpecker_frame{data=Chunked, recipe_pid=self(), task=Task});
+            send_output(State, #woodpecker_frame{data=Chunked, task=Task});
         [] -> error_logger:error_msg("[got_fin] ReqRef ~p not found in ETS table in. Data is ~p", [ReqRef, Data])
     end,
-    {noreply, State};
-
-%% got recipe
-handle_info({'recipe', ReqRef, NewStatus}, State) ->
-    ets:update_element(State#woodpecker_state.ets, ReqRef, {#wp_api_tasks.status, NewStatus}),
     {noreply, State};
 
 %% unexepted 'DOWN'
@@ -435,18 +430,23 @@ flush_gun(State, GunPid) ->
 %% get requests quota
 requests_in_period(Ets, DateFrom) ->
     MS = [{
-            #wp_api_tasks{status = '$2', last_response_date = '$1', _ = '_'},
+            #wp_api_tasks{status = '$2', last_response_date = '$1', request_date = '$3', _ = '_'},
                 [
                     {'orelse',
                         {'and',
                             {'and',
-                                {'=/=','$2','need_retry'},
                                 {'>','$1',{const,DateFrom}},
                                 {'=/=','$1','undefined'}
                             },
                             {'=/=','$2','need_retry'}
                         },    
-                        {'=:=','$2','processing'}
+                        {'and', 
+                            {'and',
+                                {'>','$3',{const,DateFrom}},
+                                {'=/=','$3','undefined'}
+                            },
+                            {'=:=','$2','processing'}
+                        }
                     }
                 ],
                 [true]
