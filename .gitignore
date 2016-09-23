@@ -14,5 +14,10 @@ ttb_last_config
 .rebar
 .dialyzer_plt
 woodpecker.d
+*.beam
 *.plt
+cover/*
+eunit.coverdata
+ct.cover.spec
 .erlang.mk/
+.DS_Store

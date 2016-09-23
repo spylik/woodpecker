@@ -8,7 +8,7 @@
 %%% We support 4 types of requests priority:
 %%% 
 %%% urgent - process request immidiatly without carry of queue and count of requests. 
-%%% be aware, we can got ban when going to use it.
+%%% be aware, it can get ban when going to spam the remote server
 %%% need-retry every one second without degradation till max_retry occurs
 %%% 
 %%% high - process request immidiatly, but with carry of count of requests.
@@ -22,9 +22,12 @@
 %%% --------------------------------------------------------------------------------
 
 -module(woodpecker).
+-define(NOTEST, true).
+-ifdef(TEST).
+    -compile(export_all).
+-endif.
 
 -include("woodpecker.hrl").
--include_lib("stdlib/include/ms_transform.hrl").
 
 %% gen server is here
 -behaviour(gen_server).
@@ -36,28 +39,64 @@
 %% public api
 -export([
         start_link/1,
-        get/2,
-        get/3
+        stop/1,
+        stop/2,
+        get_topic/1,
+        get_nofin_topic/1,
+        async_get/2,
+        async_get/3
     ]).
 
 % --------------------------------- gen_server part --------------------------------------
 
-%% start api
+% @doc start api when State is #woodpecker_state
+-spec start_link(State) -> Result when
+    State   :: woodpecker_state(),
+    Result  :: {ok,Pid} | ignore | {error,Error},
+    Pid     :: pid(),
+    Error   :: {already_started,Pid} | term().
+
 start_link(State) when 
 				State#woodpecker_state.server =/= undefined 
         andalso State#woodpecker_state.connect_to_port =/= undefined
         andalso State#woodpecker_state.connect_to =/= undefined ->
-    error_logger:info_msg("Woodpecker start with state ~p",[State]),
-    gen_server:start_link({local, State#woodpecker_state.server}, ?MODULE, [State, self()], []).
+    gen_server:start_link({local, State#woodpecker_state.server}, ?MODULE, {State, self()}, []).
 
-% when #erlpusher_state.report_to undefined, we going to send output to parent pid
-init([State = #woodpecker_state{report_to = undefined}, Parent]) ->
-    init([State#woodpecker_state{report_to = Parent}, Parent]);
+% @doc API for stop gen_server. Default is sync call.
+-spec stop(Server) -> Result when
+    Server  :: server(),
+    Result  :: term().
 
-init([State = #woodpecker_state{
+stop(Server) ->
+    stop('sync', Server).
+
+% @doc API for stop gen_server. We support async casts and sync calls aswell.
+-spec stop(SyncAsync, Server) -> Result when
+    SyncAsync   :: 'sync' | 'async',
+    Server      :: server(),
+    Result      :: term().
+
+stop('sync', Server) ->
+    gen_server:stop(Server);
+stop('async', Server) ->
+    gen_server:cast(Server, stop).
+
+% @doc when #erlpusher_state.report_to undefined, we going to send output to parent pid
+-spec init({State, Parent}) -> Result when
+    State   :: woodpecker_state(),
+    Parent  :: pid(),
+    Result  :: {ok, NState},
+    NState  :: woodpecker_state().
+
+init({State = #woodpecker_state{report_to = 'undefined'}, Parent}) ->
+    init({State#woodpecker_state{report_to = Parent}, Parent});
+
+init({State = #woodpecker_state{
         server = Server, 
-        heartbeat_freq = Heartbeat_freq
-    }, _Parent]) ->
+        heartbeat_freq = Heartbeat_freq,
+        max_paralell_requests = Max_paralell_requests,
+        requests_allowed_by_api = Requests_allowed_by_api
+    }, _Parent}) ->
     Ets = generate_ets_name(Server),
     _ = ets:new(Ets, [set, protected, {keypos, #wp_api_tasks.ref}, named_table]),
 
@@ -69,10 +108,20 @@ init([State = #woodpecker_state{
             ets = Ets,
             heartbeat_tref = TRef,
             report_topic = generate_topic(State),
-            report_nofin_topic = generate_nofin_topic(State)
+            report_nofin_topic = generate_nofin_topic(State),
+            api_requests_quota = Requests_allowed_by_api,
+            paralell_requests_quota = Max_paralell_requests
         }}.
 
 %--------------handle_call-----------------
+
+% @doc callbacks for gen_server handle_call.
+-spec handle_call(Message, From, State) -> Result when
+    Message :: term(),
+    From :: {pid(), Tag},
+    Tag :: term(),
+    State :: term(),
+    Result :: {reply, Result, State}.
 
 %% handle_call for all other thigs
 handle_call(Msg, _From, State) ->
@@ -82,38 +131,42 @@ handle_call(Msg, _From, State) ->
 
 %--------------handle_cast-----------------
 
-%% create task
-handle_cast({create_task, Method, Priority, Url}, State) ->
-    error_logger:info_msg("Woodpecker got new task: ~p: ~p", [Method,Url]),
+% @doc callbacks for gen_server handle_call.
+-spec handle_cast(Message, State) -> Result when
+    Message :: 'stop' | newtaskmsg(),
+    State   :: woodpecker_state(),
+    Result  :: {noreply, State} | {stop, normal, State}.
+
+% @doc create task
+handle_cast({'create_task', Method, Priority, Url, Headers, Body}, State) ->
     TempRef = erlang:make_ref(),
     ets:insert(State#woodpecker_state.ets, 
         Task = #wp_api_tasks{
             ref = TempRef,
-            status = new,
+            status = 'new',
             priority = Priority,
             method = Method,
             url = Url,
-            insert_date = get_time()
+            insert_date = get_time(),
+            headers = Headers,
+            body = Body
         }),
-    case Priority of
-        urgent ->
-            gen_server:cast(self(), [gun_request, Task]);
-        high when State#woodpecker_state.api_requests_quota > 0 ->
-            gen_server:cast(self(), [gun_request, Task]);
+    Quota = get_quota(State),
+    NewState = case Priority of
+        'urgent' ->
+            gun_request(Task, State#woodpecker_state{api_requests_quota = Quota});
+        'high' when Quota > 0 ->
+            gun_request(Task, State#woodpecker_state{api_requests_quota = Quota});
         _ ->
-            ok
+            State
     end,
-    {noreply, State};
-
-%% gun_request
-handle_cast([gun_request, Task], State) ->
-    update_request_to_processing(State, Task, Task#wp_api_tasks.ref),
-    NewState = connect(State, State#woodpecker_state.gun_pid),
-    request(NewState, Task, NewState#woodpecker_state.gun_pid),
     {noreply, NewState};
 
+% @doc handle_cast for stop
+handle_cast(stop, State) ->
+    {stop, normal, State};
 
-%% handle_cast for all other thigs
+% @doc handle_cast for undexepted things
 handle_cast(Msg, State) ->
     error_logger:warning_msg("we are in undefined handle cast with message ~p~n",[Msg]),
     {noreply, State}.
@@ -122,112 +175,120 @@ handle_cast(Msg, State) ->
 
 %--------------handle_info-----------------
 
+% @doc callbacks for gen_server handle_info.
+-spec handle_info(Message, State) -> Result when
+    Message :: 'heartbeat' | gun_response() | gun_data() | gun_push() | gun_error() | down(),
+    State   :: term(),
+    Result  :: {noreply, State}.
+
 %% heartbeat
-handle_info(heartbeat, State = #woodpecker_state{
+handle_info('heartbeat', State = #woodpecker_state{
         heartbeat_tref = Heartbeat_tref, 
         requests_allowed_in_period = Requests_allowed_in_period,
+        max_paralell_requests = Max_paralell_requests,
         ets = Ets,
-        heartbeat_freq = Heartbeat_freq,
-        requests_allowed_by_api = Requests_allowed_by_api
+        heartbeat_freq = Heartbeat_freq
     }) ->
     _ = erlang:cancel_timer(Heartbeat_tref),
     
     NewThan = get_time() - Requests_allowed_in_period,
-    
-    % we going to run task
-    RequestsInPeriod = requests_in_period(Ets,NewThan),
-    OldQuota = Requests_allowed_by_api-RequestsInPeriod,
-    Quota = run_task(State#woodpecker_state{api_requests_quota = OldQuota}),
+    OldQuota = get_quota(State, NewThan),
+  
+    % going to run task if have quota
+    NewState = run_task(State#woodpecker_state{
+            api_requests_quota = OldQuota, 
+            paralell_requests_quota = Max_paralell_requests-active_requests(Ets)
+        }, 'order_stage', prepare_ms(State)),
 
     % going to delete completed requests
     _ = clean_completed(Ets,NewThan),
 
     % going to retry requests with status processing and got_nofin 
-    _ = retry_staled_requests(State),
+    _ = retry_staled_requests(NewState),
 
     % new heartbeat time refference
     TRef = erlang:send_after(Heartbeat_freq, self(), heartbeat),
 
     % return state    
     {noreply, 
-        State#woodpecker_state{
-            api_requests_quota=Quota, 
+        NewState#woodpecker_state{
             heartbeat_tref=TRef
         }
     };
 
 %% gun_response, nofin state
-handle_info({gun_response,_ConnPid,ReqRef,nofin,200,_Headers}, State) ->
+handle_info({'gun_response',_ConnPid,ReqRef,nofin,200,_Headers}, State) ->
     ets:update_element(
         State#woodpecker_state.ets, ReqRef, [
-            {#wp_api_tasks.status, got_gun_response}, 
+            {#wp_api_tasks.status, 'got_gun_response'}, 
             {#wp_api_tasks.last_response_date, get_time()}
         ]),
     {noreply, State};
 
 %% gun_data, nofin state
-handle_info({gun_data,_ConnPid,ReqRef,nofin,Data}, State) ->
-    error_logger:info_msg("got data with nofin state for ReqRef ~p",[ReqRef]),
+handle_info({'gun_data',_ConnPid,ReqRef,'nofin',Data}, State) ->
+    %error_logger:info_msg("got data with nofin state for ReqRef ~p",[ReqRef]),
     case ets:lookup(State#woodpecker_state.ets, ReqRef) of
         [Task] -> 
             Chunked = chunk_data(Task#wp_api_tasks.chunked_data, Data),
             ets:insert(State#woodpecker_state.ets, 
                 Task#wp_api_tasks{
-                status = got_nofin_data,
+                status = 'got_nofin_data',
                 last_response_date = get_time(),
                 chunked_data = Chunked
             }),
 
             % chunked output
-            send_nofin_output(State, #woodpecker_frame{data=Chunked, recipe_pid=self(), task=Task});
+            send_nofin_output(State, #woodpecker_frame{data=Chunked, task=Task});
 
         [] -> error_logger:error_msg("[got_nofin] ReqRef ~p not found in ETS table. Data is ~p", [ReqRef, Data])
     end,
     {noreply, State};
 
 %% gun_data, fin state
-handle_info({gun_data,_ConnPid,ReqRef,fin,Data}, State) ->
-    error_logger:info_msg("got data with fin state for ReqRef ~p",[ReqRef]),
+handle_info({'gun_data',_ConnPid,ReqRef,'fin',Data}, State) ->
+    %error_logger:info_msg("got data with fin state for ReqRef ~p",[ReqRef]),
     case ets:lookup(State#woodpecker_state.ets, ReqRef) of
         [Task] ->
             Chunked = chunk_data(Task#wp_api_tasks.chunked_data, Data),
             ets:insert(State#woodpecker_state.ets, 
                 Task#wp_api_tasks{
-                    status = got_fin_data,
+                    status = 'got_fin_data',
                     last_response_date = get_time(),
                     chunked_data = Chunked
                 }
             ),
 
             % final output
-            send_output(State, #woodpecker_frame{data=Chunked, recipe_pid=self(), task=Task});
+            send_output(State, #woodpecker_frame{data=Chunked, task=Task});
         [] -> error_logger:error_msg("[got_fin] ReqRef ~p not found in ETS table in. Data is ~p", [ReqRef, Data])
     end,
     {noreply, State};
 
-%% got recipe
-handle_info({recipe, ReqRef, NewStatus}, State) ->
-    ets:update_element(State#woodpecker_state.ets, ReqRef, {#wp_api_tasks.status, NewStatus}),
-    {noreply, State};
-
-% close and other events bringing gun to flush
-
-%% gun_error
-handle_info({gun_error,ConnPid,ReqRef,{Reason,Descr}}, State) ->
-    error_logger:error_msg("got gun_error for ReqRef ~p with reason: ~p, ~p",[ReqRef, Reason, Descr]),
+% @doc gun_error with ReqRef
+handle_info({'gun_error', ConnPid, ReqRef, Reason}, State) ->
+    error_logger:error_msg("got gun_error for ConnPid ~p, ReqRef ~p with reason: ~p",[ConnPid, ReqRef, Reason]),
     ets:update_element(State#woodpecker_state.ets, ReqRef, 
-        {#wp_api_tasks.status, need_retry}
+        {#wp_api_tasks.status, 'need_retry'}
     ),
     NewState = flush_gun(State, ConnPid),
     {noreply, NewState};
 
-%% gun_down
-handle_info({gun_down,ConnPid,_,_,_,_}, State) ->
+%% @doc gun_error
+handle_info({'gun_error', ConnPid, Reason}, State) ->
+    error_logger:error_msg("got gun_error for ConnPid ~p with reason: ~p",[ConnPid, Reason]),
     NewState = flush_gun(State, ConnPid),
     {noreply, NewState};
 
-%% unexepted normal 'DOWN'
-handle_info({'DOWN', _ReqRef, _, ConnPid, _}, State) ->
+%% gun_down
+handle_info({'gun_down',ConnPid,_,_,_,_}, State) ->
+    error_logger:info_msg("got gun_down for ConnPid ~p",[ConnPid]),
+    NewState = flush_gun(State, ConnPid),
+    {noreply, NewState};
+
+%% unexepted 'DOWN'
+handle_info({'DOWN', MonRef, 'process', ConnPid, Reason}, State) ->
+    error_logger:error_msg("got DOWN for ConnPid ~p, MonRef ~p with Reason: ~p",[ConnPid, MonRef, Reason]),
     NewState = flush_gun(State, ConnPid),
     {noreply, NewState};
 
@@ -237,8 +298,23 @@ handle_info(Msg, State) ->
     {noreply, State}.
 %-----------end of handle_info-------------
 
+% @doc call back for terminate (we going to cancel timer here)
+-spec terminate(Reason, State) -> term() when
+    Reason :: 'normal' | 'shutdown' | {'shutdown',term()} | term(),
+    State :: term().
+
 terminate(_Reason, State) ->
-    flush_gun(State, undefined).
+    _ = flush_gun(State, undefined),
+    _ = erlang:cancel_timer(State#woodpecker_state.heartbeat_tref).
+
+% @doc call back for code_change
+-spec code_change(OldVsn, State, Extra) -> Result when
+    OldVsn :: Vsn | {down, Vsn},
+    Vsn :: term(),
+    State :: term(),
+    Extra :: term(),
+    Result :: {ok, NewState},
+    NewState :: term().
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -249,45 +325,72 @@ code_change(_OldVsn, State, _Extra) ->
 % ----------------------- other private functions ---------------------------
 
 %% open new connection to the server or do nothing if connection present
-connect(State = #woodpecker_state{
+connect(#woodpecker_state{
         connect_to = Connect_to,
-        connect_to_port = Connect_to_port
-    }, undefined) ->
-    error_logger:info_msg("need new connection ~p ~p",[Connect_to,Connect_to_port]),
+        connect_to_port = Connect_to_port,
+        gun_pid = 'undefined'} = State) ->
+    error_logger:info_msg("Going connect to ~p:~p",[Connect_to,Connect_to_port]),
     {ok, Pid} = gun:open(Connect_to, Connect_to_port, #{retry=>0}),
+	GunMonRef = monitor(process, Pid),
     case gun:await_up(Pid) of
         {ok, Protocol} ->
-			error_logger:info_msg("Connection oppened with protocol ~p to ~p ~p",[Protocol, Connect_to,Connect_to_port]),
-			GunRef = monitor(process, Pid),
-            State#woodpecker_state{gun_pid=Pid, gun_ref=GunRef};
-        {error, timeout} ->
-            flush_gun(State, Pid)
+            error_logger:info_msg("Connected to ~p:~p ~p",[Connect_to,Connect_to_port,Protocol]),
+            State#woodpecker_state{gun_pid=Pid, gun_mon_ref=GunMonRef};
+        {error, 'timeout'} ->
+            error_logger:warning_msg("Timeout during conneciton to ~p:~p",[Connect_to,Connect_to_port]),
+            flush_gun(State#woodpecker_state{gun_pid=Pid, gun_mon_ref=GunMonRef}, Pid)
     end;
-connect(State, _) ->
-    error_logger:info_msg("we have connection"),
-    State.
+connect(State) -> State.
 
-%% request
-request(State, Task, undefined) ->
-    error_logger:info_msg("going to update task ~p to need_retry", [Task#wp_api_tasks.ref]),
+gun_request(Task, State) ->
+    update_request_to_processing(State, Task, Task#wp_api_tasks.ref),
+    request(connect(State), Task).
+
+% @doc get_quota with respect of previous requests
+-spec get_quota(State) -> Result when
+    State   :: woodpecker_state(),
+    Result  :: pos_integer().
+
+get_quota(State = #woodpecker_state{requests_allowed_in_period = Requests_allowed_in_period}) ->
+    get_quota(State, get_time() - Requests_allowed_in_period).
+
+% @doc get_quota with respect of previous requests
+-spec get_quota(State,NewThan) -> Result when
+    State   :: woodpecker_state(),
+    NewThan :: pos_integer(),
+    Result  :: pos_integer().
+
+get_quota(#woodpecker_state{
+        requests_allowed_by_api = Requests_allowed_by_api,
+        ets = Ets}, NewThan) ->
+    RequestsInPeriod = requests_in_period(Ets,NewThan),
+    Requests_allowed_by_api-RequestsInPeriod.
+
+% @doc do request
+request(#woodpecker_state{gun_pid='undefined'} = State, Task) ->
     ets:update_element(State#woodpecker_state.ets, Task#wp_api_tasks.ref, [
-            {#wp_api_tasks.status, need_retry}
-        ]),
-    undefined;
-request(State, Task, GunPid) when Task#wp_api_tasks.method =:= get ->
-    error_logger:info_msg("going to update task ~p to processing", [Task#wp_api_tasks.ref]),
-    ReqRef = gun:get(GunPid, Task#wp_api_tasks.url),
-    update_request_to_processing(State, Task, ReqRef).
+            {#wp_api_tasks.status, 'need_retry'}
+        ]), 
+    State;
+request(#woodpecker_state{
+        gun_pid = GunPid, 
+        api_requests_quota = Api_requests_quota,
+        paralell_requests_quota = Paralell_requests_quota
+    } = State, #wp_api_tasks{method = 'get', url = Url, headers = Headers} = Task) ->
+    ReqRef = case Headers of 
+        'undefined' -> gun:get(GunPid, Url);
+        _ -> gun:get(GunPid, Url, Headers)
+    end,
+    update_request_to_processing(State, Task, ReqRef),
+    State#woodpecker_state{api_requests_quota = Api_requests_quota-1, paralell_requests_quota = Paralell_requests_quota-1}.
 
-%% chunk data
+% @doc chunk data
 chunk_data(undefined, NewData) ->
     NewData;
 chunk_data(OldData, NewData) ->
     <<OldData/binary, NewData/binary>>.
 
-%% update request in ets to processing
-update_request_to_processing(_, _, undefined) ->
-    ok;
+% @doc update request in ets to processing
 update_request_to_processing(State, Task, ReqRef) ->
     case Task#wp_api_tasks.ref =/= ReqRef of
         true ->
@@ -303,34 +406,59 @@ update_request_to_processing(State, Task, ReqRef) ->
             retry_count = Task#wp_api_tasks.retry_count + 1
         }).
 
-%% gun clean_up
-flush_gun(State, ConnRef) ->
-    error_logger:info_msg("We are in flush gun section with state ~p", [State]),
-    case ConnRef =:= undefined of
-        true when State#woodpecker_state.gun_ref =/= undefined ->
-            demonitor(State#woodpecker_state.gun_ref),
-            gun:close(State#woodpecker_state.gun_pid),
-            gun:flush(State#woodpecker_state.gun_pid);
+% @doc gun clean_up
+flush_gun(State, GunPid) ->
+    %error_logger:info_msg("We are in flush gun section with state ~p", [State]),
+    case GunPid =:= 'undefined' of
+        true when State#woodpecker_state.gun_mon_ref =/= undefined ->
+            demonitor(State#woodpecker_state.gun_mon_ref),
+            gun:close(State#woodpecker_state.gun_pid);
+            %gun:flush(State#woodpecker_state.gun_pid);
         true ->
             ok;
         false when State#woodpecker_state.gun_pid =:= undefined ->
-            gun:close(ConnRef),
-            gun:flush(ConnRef);
-        false when State#woodpecker_state.gun_pid =:= ConnRef ->
-            demonitor(State#woodpecker_state.gun_ref),
-            gun:close(State#woodpecker_state.gun_pid),
-            gun:flush(State#woodpecker_state.gun_pid)
+            error_logger:error_msg("Something going wrong. We got GunPid to flush while in state is undefined. Going to flush GunPid"),
+            gun:close(GunPid);
+            %gun:flush(GunPid);
+        false when State#woodpecker_state.gun_pid =:= GunPid ->
+            demonitor(State#woodpecker_state.gun_mon_ref),
+            gun:close(State#woodpecker_state.gun_pid)
+            %gun:flush(State#woodpecker_state.gun_pid)
     end,
-    State#woodpecker_state{gun_pid=undefined, gun_ref=undefined}.
+    State#woodpecker_state{gun_pid='undefined', gun_mon_ref='undefined'}.
 
 %% get requests quota
 requests_in_period(Ets, DateFrom) ->
     MS = [{
-            #wp_api_tasks{status = '$2', last_response_date = '$1', _ = '_'},
+            #wp_api_tasks{status = '$2', last_response_date = '$1', request_date = '$3', _ = '_'},
                 [
-                    {'=/=','$2',need_retry},
-                    {'=/=','$1',undefined},
-                    {'>','$1',{const,DateFrom}}
+                    {'orelse',
+                        {'andalso',
+                            {'>','$1',{const,DateFrom}},
+                            {'=/=','$1','undefined'},
+                            {'=/=','$2','need_retry'}
+                        },    
+                        {'andalso', 
+                            {'>','$3',{const,DateFrom}},
+                            {'=/=','$3','undefined'},
+                            {'=:=','$2','processing'}
+                        }
+                    }
+                ],
+                [true]
+            }
+        ],
+    ets:select_count(Ets, MS).
+
+active_requests(Ets) ->
+    MS = [{
+            #wp_api_tasks{status = '$1', _ = '_'},
+                [
+                    {'orelse',
+                        {'=:=','$1','processing'},
+                        {'=:=','$1','got_gun_response'},
+                        {'=:=','$1','got_nofin_data'}
+                    }
                 ],
                 [true]
             }
@@ -352,11 +480,11 @@ retry_staled_requests(_State = #woodpecker_state{
                 [   
                     {'orelse',
                         {'and',
-                            {'=:=','$1',processing},
+                            {'=:=','$1','processing'},
                             {'<','$3',{const,LessThanProcessing}}
                         },
                         {'and',
-                            {'=:=','$1',got_nofin_data},
+                            {'=:=','$1','got_nofin_data'},
                             {'<','$2',{const,LessThanNofin}}
                         }
                     }
@@ -366,7 +494,7 @@ retry_staled_requests(_State = #woodpecker_state{
         fun(Task) ->
             ets:insert(Ets, 
                 Task#wp_api_tasks{
-                    status = need_retry,
+                    status = 'need_retry',
                     chunked_data = undefined
             })
         end,
@@ -379,8 +507,8 @@ clean_completed(Ets,OldThan) ->
                 [   
                     {'<', '$3', OldThan},
                     {'orelse',
-                        {'=:=','$2', complete},
-                        {'=:=','$2', got_fin_data}
+                        {'=:=','$2', 'complete'},
+                        {'=:=','$2', 'got_fin_data'}
                     }
                 ], ['$1']
             }],
@@ -391,7 +519,7 @@ clean_completed(Ets,OldThan) ->
         ets:select(Ets, MS)).
 
 %% run task from ets-queue
-run_task(State = #woodpecker_state{
+prepare_ms(#woodpecker_state{
         degr_for_incomplete_requests = Degr_for_incomplete_requests,
         max_degr_for_incomplete_requests = Max_degr_for_incomplete_requests
     }) ->
@@ -399,7 +527,7 @@ run_task(State = #woodpecker_state{
     Order = [
         [[{
             #wp_api_tasks{
-                priority = urgent, 
+                priority = 'urgent', 
                 status = need_retry, 
                 max_retry = '$2', 
                 retry_count = '$1',
@@ -412,7 +540,7 @@ run_task(State = #woodpecker_state{
             [{
                 #wp_api_tasks{
                     priority = Priority, 
-                    status = need_retry, 
+                    status = 'need_retry', 
                     max_retry = '$2', 
                     retry_count = '$1',
                     _ = '_'
@@ -424,7 +552,7 @@ run_task(State = #woodpecker_state{
             [{
                 #wp_api_tasks{
                     priority = Priority, 
-                    status = need_retry,
+                    status = 'need_retry',
                     request_date = '$3',
                     max_retry = '$2', 
                     retry_count = '$1',
@@ -443,46 +571,53 @@ run_task(State = #woodpecker_state{
             [{
                 #wp_api_tasks{
                     priority = Priority, 
-                    status = new,
+                    status = 'new',
                     _ = '_'
                 },
                 [], ['$_']
             }]
-        ] || Priority <- [high, normal, low]
+        ] || Priority <- ['high', 'normal', 'low']
     ]],
+    Order.
 
-    run_task(State, order_stage, Order).
+% @doc run task
+-spec run_task(State, Stage, Tasks) -> Result when
+    State   :: woodpecker_state(),
+    Stage   :: stage(),
+    Tasks   :: [[ets:match_spec()]],
+    Result  :: woodpecker_state().
 
-%% run_task order_stage
+% when head is empty going to check tail
+run_task(State, 'order_stage', [[]|T2]) ->
+    run_task(State, 'order_stage', T2);
+
+% when tasks list is empty, just return #woodpecker_state.api_requests_quota.
+run_task(State = #woodpecker_state{
+       max_paralell_requests = Max_paralell_requests,
+       ets = Ets
+    }, _Stage, []) ->
+    State#woodpecker_state{paralell_requests_quota = Max_paralell_requests - active_requests(Ets)};
+
+% when we do not have free slots
 run_task(State = #woodpecker_state{
         api_requests_quota = Api_requests_quota,
-        ets = Ets    
-    }, order_stage, [[H|T1]|T2]) ->
-    case Api_requests_quota > 0 of
-        true ->
-            QuotaNew = run_task(State, cast_stage, ets:select(Ets, H)),
-            run_task(State#woodpecker_state{api_requests_quota=QuotaNew}, order_stage, [T1|T2]);
-        false ->
-            0
-    end;
-run_task(State, order_stage, [[]|T2]) ->
-    run_task(State, order_stage, T2);
+        paralell_requests_quota = Paralell_requests_quota,
+        max_paralell_requests = Max_paralell_requests
+    }, _Stage, _Tasks) when Api_requests_quota =< 0 orelse Paralell_requests_quota =< 0 -> 
+    State#woodpecker_state{paralell_requests_quota = Max_paralell_requests};
+
+% run_task order_stage (when have free slots we able to select tasks with current parameters)
+run_task(State = #woodpecker_state{
+        api_requests_quota = Api_requests_quota,
+        ets = Ets
+    }, 'order_stage', [[H|T1]|T2]) when Api_requests_quota > 0 ->
+    Tasks = ets:select(Ets, H),
+    NewState = run_task(State, 'cast_stage', Tasks),
+    run_task(NewState, 'order_stage', [T1|T2]);
 
 %% run_task cast_stage
-run_task(State = #woodpecker_state{
-        api_requests_quota = Api_requests_quota
-    }, cast_stage, [H|T]) ->
-    case Api_requests_quota > 0 of
-        true ->
-%            io:format("going to cast request ~p~n",[H]),
-            gen_server:cast(self(), [gun_request, H]),
-            QuotaNew = Api_requests_quota -1,
-            run_task(State#woodpecker_state{api_requests_quota=QuotaNew}, cast_stage, T);
-        false ->
-            0
-    end;
-run_task(State, _, []) ->
-    State#woodpecker_state.api_requests_quota.
+run_task(State, 'cast_stage', [H|T]) ->
+    run_task(gun_request(H, State), 'cast_stage', T).
 
 %% generate ETS table name
 generate_ets_name(Server) ->
@@ -492,7 +627,11 @@ generate_ets_name(Server) ->
 get_time() ->
     erlang:convert_time_unit(erlang:system_time(), native, milli_seconds).
 
-%% generate report topic
+% @doc generate report topic
+-spec generate_topic(State) -> Result when
+    State   :: woodpecker_state(),
+    Result  :: binary().
+
 generate_topic(_State = #woodpecker_state{
         report_topic = undefined,
         server = Server
@@ -501,7 +640,11 @@ generate_topic(_State = #woodpecker_state{
 generate_topic(State) ->
     State#woodpecker_state.report_topic.
 
-%% generate nofin report topic
+% @doc generate nofin report topic
+-spec generate_nofin_topic(State) -> Result when
+    State   :: woodpecker_state(),
+    Result  :: binary().
+
 generate_nofin_topic(_State = #woodpecker_state{
         report_topic = undefined,
         server = Server
@@ -510,7 +653,7 @@ generate_nofin_topic(_State = #woodpecker_state{
 generate_nofin_topic(State) ->
     State#woodpecker_state.report_topic.
 
-%% send nofin output (when report_nofin_to undefined we do nothing)
+% @doc send nofin output (when report_nofin_to undefined we do nothing)
 send_nofin_output(_State = #woodpecker_state{report_nofin_to=undefined}, _Frame) ->
     ok;
 send_nofin_output(_State = #woodpecker_state{
@@ -518,23 +661,61 @@ send_nofin_output(_State = #woodpecker_state{
         report_nofin_topic=Report_Nofin_topic, 
         server=Server
     }, Frame) ->
-    erlroute:pub(?MODULE, Server, ?LINE, Report_Nofin_topic, Frame);
+    erlroute:pub(?MODULE, Server, ?LINE, Report_Nofin_topic, Frame, 'hybrid', '$erlroute_cmp_woodpecker');
 send_nofin_output(_State = #woodpecker_state{report_nofin_to=ReportNofinTo}, Frame) ->
     ReportNofinTo ! Frame.
 
 %% send output
 send_output(_State = #woodpecker_state{
-        report_to=erlroute, 
-        report_topic=Report_topic, 
-        server=Server
+        report_to = 'erlroute', 
+        report_topic = Report_topic, 
+        server = Server
     }, Frame) ->
-    erlroute:pub(?MODULE, Server, ?LINE, Report_topic, Frame);
+    erlroute:pub(?MODULE, Server, ?LINE, Report_topic, Frame, 'hybrid', '$erlroute_cmp_woodpecker');
 send_output(_State = #woodpecker_state{report_to=ReportTo}, Frame) ->
     ReportTo ! Frame.
 
 %---------------------- public api others functions ----------------------
 
-get(Pid, Url) ->
-    get(Pid, Url, low).
-get(Pid, Url, Proprity) ->
-    gen_server:cast(Pid, {create_task,get,Proprity,Url}).
+% @doc get erlroute publish topic from Server state for not-yet finalyzed data 
+% (for parse on the fly)
+-spec get_nofin_topic(Server) -> Result when
+    Server  :: server(),
+    Result  :: binary().
+
+get_nofin_topic(Server) ->
+    gen_server:call(Server, 'get_nofin_topic').
+
+% @doc get erlroute publish topic from Server state
+-spec get_topic(Server) -> Result when
+    Server  :: server(),
+    Result  :: binary().
+
+get_topic(Server) ->
+    gen_server:call(Server, 'get_topic').
+
+% @doc ask woodpecker to async GET data from Url with default 'low' priority
+-spec async_get(Server, Url) -> 'ok' when
+    Server  :: server(),
+    Url     :: url().
+
+async_get(Server, Url) ->
+    async_get(Server, Url, 'low').
+
+% @doc ask woodpecker to async GET data from Url with default 'low' priority empty headers
+-spec async_get(Server, Url, Priority) -> 'ok' when
+    Server      :: server(),
+    Url         :: url(),
+    Priority    :: priority().
+
+async_get(Server, Url, Priority) -> 
+    async_get(Server, Url, Priority, 'undefined').
+
+% @doc ask woodpecker to async GET data from Url (body must be always empty for GET requsts)
+-spec async_get(Server, Url, Priority, Headers) -> 'ok' when
+    Server      :: server(),
+    Url         :: url(),
+    Headers     :: headers(),
+    Priority    :: priority().
+async_get(Server, Url, Priority, Headers) ->
+    gen_server:cast(Server, {create_task, get, Priority, Url, Headers, 'undefined'}).
