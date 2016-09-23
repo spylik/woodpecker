@@ -28,8 +28,6 @@
 -endif.
 
 -include("woodpecker.hrl").
--include_lib("stdlib/include/ms_transform.hrl").
--include("deps/teaser/include/utils.hrl").
 
 %% gen server is here
 -behaviour(gen_server).
@@ -220,7 +218,6 @@ handle_info('heartbeat', State = #woodpecker_state{
 
 %% gun_response, nofin state
 handle_info({'gun_response',_ConnPid,ReqRef,nofin,200,_Headers}, State) ->
-    ?warning("got gun_response ~p",[gun_response]),
     ets:update_element(
         State#woodpecker_state.ets, ReqRef, [
             {#wp_api_tasks.status, 'got_gun_response'}, 
