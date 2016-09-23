@@ -162,7 +162,7 @@ tests_with_gun_and_cowboy_test_() ->
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(15, length(Tasks)),
                         Tst = ets:select(ETSTable,[{#wp_api_tasks{priority = high,max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
-
+ 
                         ?assertEqual(15, length(Tst)),
                         Server ! 'heartbeat',
                         [Acc] = tutils:recieve_loop([], ?RecieveLoop, WaitAt),
@@ -176,7 +176,7 @@ tests_with_gun_and_cowboy_test_() ->
                         end, Acc),
                         ?TESTMODULE:stop(Server)
                 end},
-                {<<"Must respect max_paralell_requests for normal priority requests">>,
+                {<<"Must respect max_paralell_requests for normal priority requests (in single heartbeat)">>,
                     fun() ->
                         QueryParam = erlang:unique_integer([monotonic,positive]),
                         MQParam = integer_to_binary(QueryParam),
@@ -307,7 +307,7 @@ tests_with_gun_and_cowboy_test_() ->
                         ?assertEqual(SendReq, length(Tst1)),
                         Tst2 = ets:select(ETSTable,[{#wp_api_tasks{status = 'new', priority = 'high',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
                         Tst3 = ets:select(ETSTable,[{#wp_api_tasks{priority = 'high',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
-
+ 
                         Server ! 'heartbeat',
                         ?assertEqual(SendReq, length(Tst2)+1),
                         ?assertEqual(SendReq, length(Tst3)),
@@ -343,7 +343,7 @@ tests_with_gun_and_cowboy_test_() ->
                         timer:sleep(5),
                         Tst2 = ets:select(ETSTable,[{#wp_api_tasks{status = 'new', priority = 'normal',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
                         ?assertEqual(SendReq, length(Tst2)+Requests_allowed_by_api),
-
+ 
                         [Acc] = tutils:recieve_loop([], ?RecieveLoop, WaitAt),
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Requests_allowed_by_api, length(Acc)),
@@ -376,7 +376,7 @@ tests_with_gun_and_cowboy_test_() ->
                         timer:sleep(5),
                         Tst2 = ets:select(ETSTable,[{#wp_api_tasks{status = 'new', priority = 'low',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
                         ?assertEqual(SendReq, length(Tst2)+Requests_allowed_by_api),
-
+ 
                         [Acc] = tutils:recieve_loop([], ?RecieveLoop, WaitAt),
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Requests_allowed_by_api, length(Acc)),
@@ -391,6 +391,55 @@ tests_with_gun_and_cowboy_test_() ->
             ]
         }
     }.
+
+tests_with_gun_and_slowcowboy_test_() ->
+    {setup,
+        % setup
+        fun() ->
+            ToStop = tutils:setup_start([{'apps',[ranch,cowboy,crypto,asn1,public_key,ssl,cowlib,gun]}]),
+            CowboyRanchRef = start_cowboy(10),
+            [{'tostop', ToStop}, {'ranch_ref', CowboyRanchRef}]
+        end,
+        % cleanup
+        fun([{'tostop', ToStop},{'ranch_ref', CowboyRanchRef}]) ->
+            cowboy:stop_listener(CowboyRanchRef),
+            tutils:cleanup_stop(ToStop)
+        end, 
+        {inparallel,
+            [
+                {<<"Must respect max_paralell_requests for normal priority requests (with multiple hearbeat)">>,
+                    fun() ->
+                        QueryParam = erlang:unique_integer([monotonic,positive]),
+                        MQParam = integer_to_binary(QueryParam),
+                        WaitAt = tutils:spawn_wait_loop_max(10,?SpawnWaitLoop),
+                        Server = mlibs:random_atom(),
+                        Max_paralell_requests = 2,
+                        TimerForCowboy = 20,
+                        ETSTable = woodpecker:generate_ets_name(Server),
+                        ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, max_paralell_requests = Max_paralell_requests}),
+                        [?TESTMODULE:async_get(Server,lists:append(["/?query=",integer_to_list(QueryParam),"&wait=",integer_to_list(TimerForCowboy)]),'normal') || _A <- lists:seq(1,20)],
+                        timer:sleep(10),
+                        Tasks = ets:tab2list(ETSTable),
+                        ?assertEqual(20, length(Tasks)),
+                        Tst = ets:select(ETSTable,[{#wp_api_tasks{status = 'new', priority = normal,max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
+                        ?assertEqual(20, length(Tst)),
+                        Server ! 'heartbeat',
+                        Server ! 'heartbeat',
+                        [Acc] = tutils:recieve_loop([], ?RecieveLoop, WaitAt),
+                        ?TESTMODULE:stop(Server),
+                        ?assertEqual(Max_paralell_requests, length(Acc)),
+                        FF = hd(Acc),
+                        FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
+                        lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
+                            Data = binary_to_term(DataFrame),
+                            ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
+                            ?assertEqual(FirstPid, maps:get(pid, Data))
+                        end, Acc)
+                end}
+            ]
+        }
+    }.
+
 
 % simple test
 simple(get, Priority, NumberOfRequests) ->
@@ -425,6 +474,11 @@ start_cowboy(Acceptors) ->
 
 init(Req0, Opts) ->
     Method = cowboy_req:method(Req0),
+    #{wait := Wait} = cowboy_req:match_qs([{'wait', [], 'undefined'}], Req0),
+    case Wait of
+        'undefined' -> ok;
+        Time -> timer:sleep(binary_to_integer(Time))
+    end,
     Req = process_req(Method, Req0),
     {ok, Req, Opts}.
 

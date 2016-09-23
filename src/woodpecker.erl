@@ -154,8 +154,6 @@ handle_cast({'create_task', Method, Priority, Url, Headers, Body}, State) ->
             body = Body
         }),
     Quota = get_quota(State),
-    ?debug(State),
-    ?debug(Quota),
     NewState = case Priority of
         'urgent' ->
             gun_request(Task, State#woodpecker_state{api_requests_quota = Quota});
@@ -164,7 +162,6 @@ handle_cast({'create_task', Method, Priority, Url, Headers, Body}, State) ->
         _ ->
             State
     end,
-    ?here,
     {noreply, NewState};
 
 % @doc handle_cast for stop
@@ -198,7 +195,7 @@ handle_info('heartbeat', State = #woodpecker_state{
     
     NewThan = get_time() - Requests_allowed_in_period,
     OldQuota = get_quota(State, NewThan),
-    
+  
     % going to run task if have quota
     NewState = run_task(State#woodpecker_state{
             api_requests_quota = OldQuota, 
@@ -272,8 +269,8 @@ handle_info({'gun_data',_ConnPid,ReqRef,'fin',Data}, State) ->
     {noreply, State};
 
 % @doc gun_error with ReqRef
-handle_info({'gun_error', ConnPid, ReqRef, {Reason, Descr}}, State) ->
-    error_logger:error_msg("got gun_error for ConnPid ~p, ReqRef ~p with reason: {~p, ~p}",[ConnPid, ReqRef, Reason, Descr]),
+handle_info({'gun_error', ConnPid, ReqRef, Reason}, State) ->
+    error_logger:error_msg("got gun_error for ConnPid ~p, ReqRef ~p with reason: ~p",[ConnPid, ReqRef, Reason]),
     ets:update_element(State#woodpecker_state.ets, ReqRef, 
         {#wp_api_tasks.status, 'need_retry'}
     ),
@@ -281,8 +278,8 @@ handle_info({'gun_error', ConnPid, ReqRef, {Reason, Descr}}, State) ->
     {noreply, NewState};
 
 %% @doc gun_error
-handle_info({'gun_error', ConnPid, {Reason, Descr}}, State) ->
-    error_logger:error_msg("got gun_error for ConnPid ~p with reason: {~p, ~p}",[ConnPid, Reason, Descr]),
+handle_info({'gun_error', ConnPid, Reason}, State) ->
+    error_logger:error_msg("got gun_error for ConnPid ~p with reason: ~p",[ConnPid, Reason]),
     NewState = flush_gun(State, ConnPid),
     {noreply, NewState};
 
@@ -370,15 +367,14 @@ get_quota(#woodpecker_state{
         requests_allowed_by_api = Requests_allowed_by_api,
         ets = Ets}, NewThan) ->
     RequestsInPeriod = requests_in_period(Ets,NewThan),
-    ?debug(RequestsInPeriod),
-    ?debug(Requests_allowed_by_api),
     Requests_allowed_by_api-RequestsInPeriod.
 
 % @doc do request
 request(#woodpecker_state{gun_pid='undefined'} = State, Task) ->
     ets:update_element(State#woodpecker_state.ets, Task#wp_api_tasks.ref, [
             {#wp_api_tasks.status, 'need_retry'}
-        ]);
+        ]), 
+    State;
 request(#woodpecker_state{
         gun_pid = GunPid, 
         api_requests_quota = Api_requests_quota,
