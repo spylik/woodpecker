@@ -226,39 +226,31 @@ handle_info({'gun_response',_ConnPid,ReqRef,nofin,200,_Headers}, State) ->
     {noreply, State};
 
 %% gun_data, nofin state
-handle_info({'gun_data',_ConnPid,ReqRef,'nofin',Data}, State) ->
-    %error_logger:info_msg("got data with nofin state for ReqRef ~p",[ReqRef]),
-    case ets:lookup(State#woodpecker_state.ets, ReqRef) of
+handle_info({'gun_data',_ConnPid,ReqRef,'nofin',Data}, State = #woodpecker_state{ets = Ets}) ->
+    case ets:lookup(Ets, ReqRef) of
         [Task] -> 
             Chunked = chunk_data(Task#wp_api_tasks.chunked_data, Data),
-            ets:insert(State#woodpecker_state.ets, 
-                Task#wp_api_tasks{
-                status = 'got_nofin_data',
-                last_response_date = get_time(),
-                chunked_data = Chunked
-            }),
-
+            ets:update_element(Ets, ReqRef, [
+                {#wp_api_tasks.status, 'got_nofin_data'},
+                {#wp_api_tasks.last_response_date, get_time()},
+                {#wp_api_tasks.chunked_data,  Chunked}
+            ]),
             % chunked output
             send_nofin_output(State, #woodpecker_frame{data=Chunked, task=Task});
-
         [] -> error_logger:error_msg("[got_nofin] ReqRef ~p not found in ETS table. Data is ~p", [ReqRef, Data])
     end,
     {noreply, State};
 
 %% gun_data, fin state
-handle_info({'gun_data',_ConnPid,ReqRef,'fin',Data}, State) ->
-    %error_logger:info_msg("got data with fin state for ReqRef ~p",[ReqRef]),
-    case ets:lookup(State#woodpecker_state.ets, ReqRef) of
+handle_info({'gun_data',_ConnPid,ReqRef,'fin',Data}, State = #woodpecker_state{ets = Ets}) ->
+    case ets:lookup(Ets, ReqRef) of
         [Task] ->
             Chunked = chunk_data(Task#wp_api_tasks.chunked_data, Data),
-            ets:insert(State#woodpecker_state.ets, 
-                Task#wp_api_tasks{
-                    status = 'got_fin_data',
-                    last_response_date = get_time(),
-                    chunked_data = Chunked
-                }
-            ),
-
+            ets:update_element(Ets, ReqRef, [
+                {#wp_api_tasks.status, 'got_fin_data'},
+                {#wp_api_tasks.last_response_date, get_time()},
+                {#wp_api_tasks.chunked_data,  Chunked}
+            ]),
             % final output
             send_output(State, #woodpecker_frame{data=Chunked, task=Task});
         [] -> error_logger:error_msg("[got_fin] ReqRef ~p not found in ETS table (maybe already cleaned). Data is ~p", [ReqRef, Data])
@@ -655,8 +647,9 @@ generate_nofin_topic(_State = #woodpecker_state{
 generate_nofin_topic(State) ->
     State#woodpecker_state.report_topic.
 
+%------------------------------- send output -----------------------------
 % @doc send nofin output (when report_nofin_to undefined we do nothing)
-send_nofin_output(_State = #woodpecker_state{report_nofin_to=undefined}, _Frame) ->
+send_nofin_output(_State = #woodpecker_state{report_nofin_to='undefined'}, _Frame) ->
     ok;
 send_nofin_output(_State = #woodpecker_state{
         report_nofin_to=erlroute, 
@@ -667,13 +660,16 @@ send_nofin_output(_State = #woodpecker_state{
 send_nofin_output(_State = #woodpecker_state{report_nofin_to=ReportNofinTo}, Frame) ->
     ReportNofinTo ! Frame.
 
-%% send output
+%% @doc send output
+send_output(_State = #woodpecker_state{report_to='undefined'}, _Frame) ->
+    ok;
 send_output(_State = #woodpecker_state{
         report_to = 'erlroute', 
         report_topic = Report_topic, 
         server = Server
     }, Frame) ->
     erlroute:pub(?MODULE, Server, ?LINE, Report_topic, Frame, 'hybrid', '$erlroute_cmp_woodpecker');
+
 send_output(_State = #woodpecker_state{report_to=ReportTo}, Frame) ->
     ReportTo ! Frame.
 
