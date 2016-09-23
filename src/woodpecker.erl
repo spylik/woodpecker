@@ -261,16 +261,17 @@ handle_info({'gun_data',_ConnPid,ReqRef,'fin',Data}, State) ->
 
             % final output
             send_output(State, #woodpecker_frame{data=Chunked, task=Task});
-        [] -> error_logger:error_msg("[got_fin] ReqRef ~p not found in ETS table in. Data is ~p", [ReqRef, Data])
+        [] -> error_logger:error_msg("[got_fin] ReqRef ~p not found in ETS table (maybe already cleaned). Data is ~p", [ReqRef, Data])
     end,
     {noreply, State};
 
 % @doc gun_error with ReqRef
 handle_info({'gun_error', ConnPid, ReqRef, Reason}, State) ->
     error_logger:error_msg("got gun_error for ConnPid ~p, ReqRef ~p with reason: ~p",[ConnPid, ReqRef, Reason]),
-    ets:update_element(State#woodpecker_state.ets, ReqRef, 
-        {#wp_api_tasks.status, 'need_retry'}
-    ),
+    ets:update_element(State#woodpecker_state.ets, ReqRef, [
+        {#wp_api_tasks.status, 'need_retry'},
+        {#wp_api_tasks.chunked_data, 'undefined'}
+    ]),
     NewState = flush_gun(State, ConnPid),
     {noreply, NewState};
 
@@ -369,7 +370,8 @@ get_quota(#woodpecker_state{
 % @doc do request
 request(#woodpecker_state{gun_pid='undefined'} = State, Task) ->
     ets:update_element(State#woodpecker_state.ets, Task#wp_api_tasks.ref, [
-            {#wp_api_tasks.status, 'need_retry'}
+            {#wp_api_tasks.status, 'need_retry'},
+            {#wp_api_tasks.chunked_data, 'undefined'}
         ]), 
     State;
 request(#woodpecker_state{
@@ -401,7 +403,7 @@ update_request_to_processing(State, Task, ReqRef) ->
     ets:insert(State#woodpecker_state.ets, 
         Task#wp_api_tasks{
             ref = ReqRef,
-            status = processing,
+            status = 'processing',
             request_date = get_time(),
             retry_count = Task#wp_api_tasks.retry_count + 1
         }).
@@ -491,12 +493,12 @@ retry_staled_requests(_State = #woodpecker_state{
                 ], ['$_']
             }],
     lists:map(
-        fun(Task) ->
-            ets:insert(Ets, 
-                Task#wp_api_tasks{
-                    status = 'need_retry',
-                    chunked_data = undefined
-            })
+        fun(#wp_api_tasks{ref = ReqRef}) ->
+            ets:update_element(
+                Ets, ReqRef, [
+                    {#wp_api_tasks.status, 'need_retry'}, 
+                    {#wp_api_tasks.chunked_data, 'undefined'}
+                ])
         end,
         ets:select(Ets, MS)).
 
