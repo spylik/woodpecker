@@ -1,6 +1,6 @@
 % this record for keep api-request task
 
--type status()      :: 'new' | 'processing' |'got_gun_response' | 'got_nofin_data' | 'got_fin_data' | 'need_retry' | 'complete'.
+-type status()      :: 'new' | 'processing' |'got_gun_response' | 'got_nofin_data' | 'got_fin_data' | 'need_retry'.
 -type priority()    :: 'urgent' | 'high' | 'normal' | 'low'.
 -type method()      :: 'get' | 'post'.
 -type mspec()       :: '_' | '$1' | '$2' | '$3' | '$4' | '$5'.
@@ -22,7 +22,7 @@
 -type down()            :: {'DOWN', mon_ref(), 'process', stream_ref(), term()}. 
 
 -record(wp_api_tasks, {
-        ref                     :: reference() | mspec(),
+        ref                     :: reference() | {'temp',reference()} | mspec(),
         status = 'new'          :: status() | mspec(),
         priority = 'low'        :: priority() | mspec(),
         method                  :: method() | mspec(),            % moderate
@@ -55,11 +55,14 @@
         requests_allowed_by_api = 600 :: pos_integer(),                 % count of requests allowed by api per period
         requests_allowed_in_period = 600000 :: pos_integer(),           % period (milli-seconds)
         max_paralell_requests = 8 :: pos_integer(),                     % maximim paralell requests
-        timeout_for_processing_requests = 60000 :: pos_integer(),       % timeout for requests with status "processing" (milli-seconds)
-        timeout_for_nofin_requests = 180000 :: pos_integer(),           % timeout for requests with status "nofin" (milli-seconds)
-        degr_for_incomplete_requests = 1000 :: pos_integer(),           % Degradation for incomplete requests (retry_count * this variable, milli-seconds)
-        max_degr_for_incomplete_requests = 3600000 :: pos_integer(),    % Max degradation for incomplete requests
+        timeout_for_got_gun_response_requests = 20000 :: pos_integer(), % timeout for requests with status "got_gun_response" (milli-seconds)
+        timeout_for_processing_requests = 20000 :: pos_integer(),       % timeout for requests with status "processing" (milli-seconds)
+        timeout_for_nofin_requests = 20000 :: pos_integer(),            % timeout for requests with status "nofin" (milli-seconds)
+        freeze_for_incomplete_requests = 1000 :: pos_integer(),         % Freezing for incomplete requests (retry_count * this variable, milli-seconds)
+        max_freeze_for_incomplete_requests = 3600000 :: pos_integer(),  % Max freeze timeout for incomplete requests
         heartbeat_freq = 1000 :: pos_integer(),                         % heartbeat frequency (in milliseconds)
+        flush_completed_req = true :: boolean(),                        % flush data for completed requests?
+        allow_dupes = true :: boolean(),                                % do we allow dupes for incompleted requests? (same URL and same data)
         % woodpecker operations section
         ets :: atom() | 'undefined',                                    % generated ets_name saved in state
         gun_pid :: pid() | 'undefined',                                 % current gun connection Pid
