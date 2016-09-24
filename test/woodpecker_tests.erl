@@ -387,7 +387,12 @@ tests_with_gun_and_cowboy_test_() ->
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
                             ?assertEqual(FirstPid, maps:get(pid, Data))
                         end, Acc)
-                end}
+                end},
+                {<<"Request order test">>,
+                    fun() ->
+                        ok
+                    end
+                }
             ]
         }
     }.
