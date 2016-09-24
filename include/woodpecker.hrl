@@ -57,7 +57,7 @@
         max_paralell_requests = 8 :: pos_integer(),                     % maximim paralell requests
         timeout_for_got_gun_response_requests = 20000 :: pos_integer(), % timeout for requests with status "got_gun_response" (milli-seconds)
         timeout_for_processing_requests = 20000 :: pos_integer(),       % timeout for requests with status "processing" (milli-seconds)
-        timeout_for_nofin_requests = 20000 :: pos_integer(),           % timeout for requests with status "nofin" (milli-seconds)
+        timeout_for_nofin_requests = 20000 :: pos_integer(),            % timeout for requests with status "nofin" (milli-seconds)
         freeze_for_incomplete_requests = 1000 :: pos_integer(),         % Freezing for incomplete requests (retry_count * this variable, milli-seconds)
         max_freeze_for_incomplete_requests = 3600000 :: pos_integer(),  % Max freeze timeout for incomplete requests
         heartbeat_freq = 1000 :: pos_integer(),                         % heartbeat frequency (in milliseconds)

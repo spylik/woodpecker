@@ -264,28 +264,27 @@ handle_info({'gun_error', ConnPid, ReqRef, Reason}, State) ->
         {#wp_api_tasks.status, 'need_retry'},
         {#wp_api_tasks.chunked_data, 'undefined'}
     ]),
-    NewState = flush_gun(State, ConnPid),
-    {noreply, NewState};
+    {noreply, flush_gun(State, ConnPid)};
 
-%% @doc gun_error
+% @doc gun_error
 handle_info({'gun_error', ConnPid, Reason}, State) ->
     error_logger:error_msg("got gun_error for ConnPid ~p with reason: ~p",[ConnPid, Reason]),
-    NewState = flush_gun(State, ConnPid),
-    {noreply, NewState};
+    {noreply, flush_gun(State, ConnPid)};
 
-%% gun_down
+% @doc gun_down
 handle_info({'gun_down',ConnPid,_,_,_,_}, State) ->
-    error_logger:info_msg("got gun_down for ConnPid ~p",[ConnPid]),
-    NewState = flush_gun(State, ConnPid),
-    {noreply, NewState};
+    {noreply, flush_gun(State, ConnPid)};
 
-%% unexepted 'DOWN'
+% @doc expected down with state 'normal'
+handle_info({'DOWN', _MonRef, 'process', ConnPid, 'normal'}, State) ->
+    {noreply, flush_gun(State, ConnPid)};
+
+% @doc unexepted 'DOWN'
 handle_info({'DOWN', MonRef, 'process', ConnPid, Reason}, State) ->
     error_logger:error_msg("got DOWN for ConnPid ~p, MonRef ~p with Reason: ~p",[ConnPid, MonRef, Reason]),
-    NewState = flush_gun(State, ConnPid),
-    {noreply, NewState};
+    {noreply, flush_gun(State, ConnPid)};
 
-%% handle_info for all other thigs
+% @doc handle_info for all other thigs
 handle_info(Msg, State) ->
     error_logger:warning_msg("we are in undefined handle info with message ~p~n",[Msg]),
     {noreply, State}.
@@ -436,7 +435,6 @@ flush_gun(State, GunPid) ->
         true ->
             ok;
         false when State#woodpecker_state.gun_pid =:= undefined ->
-            error_logger:error_msg("Something going wrong. We got GunPid to flush while in state is undefined. Going to flush GunPid"),
             gun:close(GunPid);
             %gun:flush(GunPid);
         false when State#woodpecker_state.gun_pid =:= GunPid ->
