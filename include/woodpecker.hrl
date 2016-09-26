@@ -32,16 +32,12 @@
         insert_date             :: pos_integer() | mspec(),
         request_date            :: 'undefined' | pos_integer() | mspec(),
         last_response_date      :: 'undefined' | pos_integer() | mspec(),
-        chunked_data            :: 'undefined' | binary() | mspec(),
+        response_headers        :: 'undefined' | headers() | mspec(),
+        data                    :: 'undefined' | binary() | mspec(),
         max_retry = 9999        :: non_neg_integer() | mspec(),
         retry_count = 0         :: non_neg_integer() | mspec()
     }).
-
--record(woodpecker_frame, {
-        data,
-        task = #wp_api_tasks{}
-    }).
--type woodpecker_frame() :: #woodpecker_frame{}.
+-type wp_api_tasks() :: #wp_api_tasks{}.
 
 -record(woodpecker_state, {
         % user specification section

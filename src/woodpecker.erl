@@ -217,26 +217,33 @@ handle_info('heartbeat', State = #woodpecker_state{
     };
 
 %% gun_response, nofin state
-handle_info({'gun_response',_ConnPid,ReqRef,nofin,200,_Headers}, State) ->
+handle_info({'gun_response',_ConnPid,ReqRef,'nofin',200,Headers}, State) ->
     ets:update_element(
         State#woodpecker_state.ets, ReqRef, [
             {#wp_api_tasks.status, 'got_gun_response'}, 
-            {#wp_api_tasks.last_response_date, get_time()}
+            {#wp_api_tasks.last_response_date, get_time()},
+            {#wp_api_tasks.response_headers, Headers}
         ]),
     {noreply, State};
 
 %% gun_data, nofin state
 handle_info({'gun_data',_ConnPid,ReqRef,'nofin',Data}, State = #woodpecker_state{ets = Ets}) ->
     case ets:lookup(Ets, ReqRef) of
-        [Task] -> 
-            Chunked = chunk_data(Task#wp_api_tasks.chunked_data, Data),
+        [Task] ->
+            LastDate = get_time(),
+            Chunked = chunk_data(Task#wp_api_tasks.data, Data),
             ets:update_element(Ets, ReqRef, [
                 {#wp_api_tasks.status, 'got_nofin_data'},
-                {#wp_api_tasks.last_response_date, get_time()},
-                {#wp_api_tasks.chunked_data,  Chunked}
+                {#wp_api_tasks.last_response_date, LastDate},
+                {#wp_api_tasks.data, Chunked}
             ]),
             % chunked output
-            send_nofin_output(State, #woodpecker_frame{data=Chunked, task=Task});
+            send_nofin_output(State, Task#wp_api_tasks{
+                    status = 'got_nofin_data',
+                    last_response_date = LastDate,
+                    data = Chunked
+                });
+
         [] -> error_logger:error_msg("[got_nofin] ReqRef ~p not found in ETS table. Data is ~p", [ReqRef, Data])
     end,
     {noreply, State};
@@ -245,14 +252,19 @@ handle_info({'gun_data',_ConnPid,ReqRef,'nofin',Data}, State = #woodpecker_state
 handle_info({'gun_data',_ConnPid,ReqRef,'fin',Data}, State = #woodpecker_state{ets = Ets}) ->
     case ets:lookup(Ets, ReqRef) of
         [Task] ->
-            Chunked = chunk_data(Task#wp_api_tasks.chunked_data, Data),
+            LastDate = get_time(),
+            Chunked = chunk_data(Task#wp_api_tasks.data, Data),
             ets:update_element(Ets, ReqRef, [
                 {#wp_api_tasks.status, 'got_fin_data'},
-                {#wp_api_tasks.last_response_date, get_time()},
-                {#wp_api_tasks.chunked_data,  Chunked}
+                {#wp_api_tasks.last_response_date, LastDate},
+                {#wp_api_tasks.data, Chunked}
             ]),
             % final output
-            send_output(State, #woodpecker_frame{data=Chunked, task=Task});
+            send_output(State, Task#wp_api_tasks{
+                    status = 'got_fin_data',
+                    last_response_date = LastDate,
+                    data = Chunked
+                });
         [] -> error_logger:error_msg("[got_fin] ReqRef ~p not found in ETS table (maybe already cleaned). Data is ~p", [ReqRef, Data])
     end,
     {noreply, State};
@@ -262,7 +274,8 @@ handle_info({'gun_error', ConnPid, ReqRef, Reason}, State) ->
     error_logger:error_msg("got gun_error for ConnPid ~p, ReqRef ~p with reason: ~p",[ConnPid, ReqRef, Reason]),
     ets:update_element(State#woodpecker_state.ets, ReqRef, [
         {#wp_api_tasks.status, 'need_retry'},
-        {#wp_api_tasks.chunked_data, 'undefined'}
+        {#wp_api_tasks.response_headers, 'undefined'},
+        {#wp_api_tasks.data, 'undefined'}
     ]),
     {noreply, flush_gun(State, ConnPid)};
 
@@ -387,7 +400,8 @@ get_quota(#woodpecker_state{
 request(#woodpecker_state{gun_pid='undefined'} = State, Task) ->
     ets:update_element(State#woodpecker_state.ets, Task#wp_api_tasks.ref, [
             {#wp_api_tasks.status, 'need_retry'},
-            {#wp_api_tasks.chunked_data, 'undefined'}
+            {#wp_api_tasks.response_headers, 'undefined'},
+            {#wp_api_tasks.data, 'undefined'}
         ]), 
     State;
 request(#woodpecker_state{
@@ -513,8 +527,9 @@ retry_staled_requests(_State = #woodpecker_state{
         fun(#wp_api_tasks{ref = ReqRef}) ->
             ets:update_element(
                 Ets, ReqRef, [
-                    {#wp_api_tasks.status, 'need_retry'}, 
-                    {#wp_api_tasks.chunked_data, 'undefined'}
+                    {#wp_api_tasks.status, 'need_retry'},
+                    {#wp_api_tasks.response_headers, 'undefined'},
+                    {#wp_api_tasks.data, 'undefined'}
                 ])
         end,
         ets:select(Ets, MS)).
