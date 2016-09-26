@@ -140,8 +140,8 @@ tests_with_gun_and_cowboy_test_() ->
                         [Acc] = tutils:recieve_loop([], ?RecieveLoop, WaitAt),
                         ?assertEqual(15, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
-                        lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
+                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        lists:map(fun(#wp_api_tasks{data = DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
                             ?assertEqual(FirstPid, maps:get(pid, Data))
@@ -168,8 +168,8 @@ tests_with_gun_and_cowboy_test_() ->
                         [Acc] = tutils:recieve_loop([], ?RecieveLoop, WaitAt),
                         ?assertEqual(15, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
-                        lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
+                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        lists:map(fun(#wp_api_tasks{data = DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
                             ?assertEqual(FirstPid, maps:get(pid, Data))
@@ -196,8 +196,8 @@ tests_with_gun_and_cowboy_test_() ->
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Max_paralell_requests, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
-                        lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
+                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        lists:map(fun(#wp_api_tasks{data = DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
                             ?assertEqual(FirstPid, maps:get(pid, Data))
@@ -223,8 +223,8 @@ tests_with_gun_and_cowboy_test_() ->
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Max_paralell_requests, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
-                        lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
+                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        lists:map(fun(#wp_api_tasks{data = DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
                             ?assertEqual(FirstPid, maps:get(pid, Data))
@@ -251,8 +251,8 @@ tests_with_gun_and_cowboy_test_() ->
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(SendReq, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
-                        lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
+                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        lists:map(fun(#wp_api_tasks{data = DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
                             ?assertEqual(FirstPid, maps:get(pid, Data))
@@ -280,8 +280,8 @@ tests_with_gun_and_cowboy_test_() ->
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Requests_allowed_by_api, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
-                        lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
+                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        lists:map(fun(#wp_api_tasks{data = DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
                             ?assertEqual(FirstPid, maps:get(pid, Data))
@@ -315,8 +315,8 @@ tests_with_gun_and_cowboy_test_() ->
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Requests_allowed_by_api, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
-                        lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
+                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        lists:map(fun(#wp_api_tasks{data = DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
                             ?assertEqual(FirstPid, maps:get(pid, Data))
@@ -348,8 +348,8 @@ tests_with_gun_and_cowboy_test_() ->
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Requests_allowed_by_api, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
-                        lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
+                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        lists:map(fun(#wp_api_tasks{data = DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
                             ?assertEqual(FirstPid, maps:get(pid, Data))
@@ -381,8 +381,8 @@ tests_with_gun_and_cowboy_test_() ->
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Requests_allowed_by_api, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
-                        lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
+                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        lists:map(fun(#wp_api_tasks{data = DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
                             ?assertEqual(FirstPid, maps:get(pid, Data))
@@ -434,8 +434,8 @@ tests_with_gun_and_slowcowboy_test_() ->
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Max_paralell_requests, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
-                        lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
+                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        lists:map(fun(#wp_api_tasks{data = DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
                             ?assertEqual(FirstPid, maps:get(pid, Data))
@@ -457,8 +457,8 @@ simple(get, Priority, NumberOfRequests) ->
     [Acc] = tutils:recieve_loop([], 220, WaitAt),
     ?assertEqual(NumberOfRequests, length(Acc)),
     FF = hd(Acc),
-    FirstPid = maps:get(pid, binary_to_term(FF#woodpecker_frame.data)),
-    lists:map(fun(#woodpecker_frame{data = DataFrame}) ->
+    FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+    lists:map(fun(#wp_api_tasks{data = DataFrame}) ->
         Data = binary_to_term(DataFrame),
         ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
         ?assertEqual(FirstPid, maps:get(pid, Data))
