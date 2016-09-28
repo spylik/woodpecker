@@ -27,6 +27,7 @@
 -endif.
 
 -include("woodpecker.hrl").
+-include("deps/teaser/include/utils.hrl").
 
 %% gen server is here
 -behaviour(gen_server).
@@ -93,7 +94,7 @@ init({State = #woodpecker_state{report_to = 'undefined'}, Parent}) ->
 init({State = #woodpecker_state{
         server = Server, 
         heartbeat_freq = Heartbeat_freq,
-        max_paralell_requests = Max_paralell_requests,
+        max_paralell_requests_per_conn = Max_paralell_requests_per_conn,
         requests_allowed_by_api = Requests_allowed_by_api
     }, _Parent}) ->
     Ets = generate_ets_name(Server),
@@ -109,7 +110,7 @@ init({State = #woodpecker_state{
             report_topic = generate_topic(State),
             report_nofin_topic = generate_nofin_topic(State),
             api_requests_quota = Requests_allowed_by_api,
-            paralell_requests_quota = Max_paralell_requests
+            paralell_requests_quota = Max_paralell_requests_per_conn
         }}.
 
 %--------------handle_call-----------------
@@ -179,7 +180,7 @@ handle_cast(Msg, State) ->
 handle_info('heartbeat', State = #woodpecker_state{
         heartbeat_tref = Heartbeat_tref, 
         requests_allowed_in_period = Requests_allowed_in_period,
-        max_paralell_requests = Max_paralell_requests,
+        max_paralell_requests_per_conn = Max_paralell_requests_per_conn,
         ets = Ets,
         heartbeat_freq = Heartbeat_freq,
         flush_completed_req = Flush_completed_req
@@ -192,7 +193,7 @@ handle_info('heartbeat', State = #woodpecker_state{
     % going to run task if have quota
     NewState = run_task(State#woodpecker_state{
             api_requests_quota = OldQuota, 
-            paralell_requests_quota = Max_paralell_requests-active_requests(Ets)
+            paralell_requests_quota = Max_paralell_requests_per_conn-active_requests(Ets)
         }, 'order_stage', prepare_ms(State)),
 
     % going to delete completed requests
@@ -358,17 +359,25 @@ create_task({Method, Priority, Url, Headers, Body}, State = #woodpecker_state{et
 connect(#woodpecker_state{
         connect_to = Connect_to,
         connect_to_port = Connect_to_port,
-        gun_pid = 'undefined'} = State) ->
+        current_gun_pid = 'undefined',
+        gun_pids = Gun_pids} = State) ->
     error_logger:info_msg("Going connect to ~p:~p",[Connect_to,Connect_to_port]),
     {ok, Pid} = gun:open(Connect_to, Connect_to_port, #{retry=>0}),
 	GunMonRef = monitor(process, Pid),
     case gun:await_up(Pid) of
         {ok, Protocol} ->
             error_logger:info_msg("Connected to ~p:~p ~p",[Connect_to,Connect_to_port,Protocol]),
-            State#woodpecker_state{gun_pid=Pid, gun_mon_ref=GunMonRef};
+            State#woodpecker_state{
+                current_gun_pid = Pid, 
+                gun_pids = Gun_pids#{Pid => GunMonRef}
+            };
         {error, 'timeout'} ->
             error_logger:warning_msg("Timeout during conneciton to ~p:~p",[Connect_to,Connect_to_port]),
-            flush_gun(State#woodpecker_state{gun_pid=Pid, gun_mon_ref=GunMonRef}, Pid)
+            flush_gun(
+                State#woodpecker_state{
+                    current_gun_pid = Pid, 
+                    gun_pids = Gun_pids#{Pid => GunMonRef}
+                }, Pid)
     end;
 connect(State) -> State.
 
@@ -397,7 +406,7 @@ get_quota(#woodpecker_state{
     Requests_allowed_by_api-RequestsInPeriod.
 
 % @doc do request
-request(#woodpecker_state{gun_pid='undefined'} = State, Task) ->
+request(#woodpecker_state{current_gun_pid='undefined'} = State, Task) ->
     ets:update_element(State#woodpecker_state.ets, Task#wp_api_tasks.ref, [
             {#wp_api_tasks.status, 'need_retry'},
             {#wp_api_tasks.response_headers, 'undefined'},
@@ -405,7 +414,7 @@ request(#woodpecker_state{gun_pid='undefined'} = State, Task) ->
         ]), 
     State;
 request(#woodpecker_state{
-        gun_pid = GunPid, 
+        current_gun_pid = GunPid, 
         api_requests_quota = Api_requests_quota,
         paralell_requests_quota = Paralell_requests_quota
     } = State, #wp_api_tasks{method = 'get', url = Url, headers = Headers} = Task) ->
@@ -438,25 +447,41 @@ update_request_to_processing(State, Task, ReqRef) ->
             retry_count = Task#wp_api_tasks.retry_count + 1
         }).
 
-% @doc gun clean_up
-flush_gun(State, GunPid) ->
-    %error_logger:info_msg("We are in flush gun section with state ~p", [State]),
-    case GunPid =:= 'undefined' of
-        true when State#woodpecker_state.gun_mon_ref =/= undefined ->
-            demonitor(State#woodpecker_state.gun_mon_ref),
-            gun:close(State#woodpecker_state.gun_pid);
-            %gun:flush(State#woodpecker_state.gun_pid);
-        true ->
-            ok;
-        false when State#woodpecker_state.gun_pid =:= undefined ->
-            gun:close(GunPid);
-            %gun:flush(GunPid);
-        false when State#woodpecker_state.gun_pid =:= GunPid ->
-            demonitor(State#woodpecker_state.gun_mon_ref),
-            gun:close(State#woodpecker_state.gun_pid)
-            %gun:flush(State#woodpecker_state.gun_pid)
-    end,
-    State#woodpecker_state{gun_pid='undefined', gun_mon_ref='undefined'}.
+% @doc gun clean_up when do not specify which GunPid we would like to cleanup
+% going to clean_up all guns
+flush_gun(#woodpecker_state{
+            gun_pids = Gun_pids,
+            max_total_req_per_conn = Max_total_req_per_conn
+        } = State, 'undefined') ->
+    lists:map(fun({Pid, MonRef}) ->
+            demonitor(MonRef),
+            gun:close(Pid)
+    end, maps:to_list(Gun_pids)),
+    State#woodpecker_state{
+        gun_pids = maps:new(), 
+        current_gun_pid = 'undefined',
+        total_req_per_conn_quota = Max_total_req_per_conn};
+
+% @doc gun clean_up for specified gun_pid
+flush_gun(#woodpecker_state{
+            gun_pids = Gun_pids,
+            current_gun_pid = Current_gun_pid,
+            max_total_req_per_conn = Max_total_req_per_conn
+        } = State, GunPid) ->
+    MonRef = maps:get(GunPid, Gun_pids, 'undefined'),
+    demonitor(MonRef),
+    gun:close(GunPid),
+    case GunPid =:= Current_gun_pid of
+        true -> 
+            State#woodpecker_state{
+                current_gun_pid = 'undefined',
+                gun_pids = maps:without([GunPid], Gun_pids)
+            };
+        false ->
+            State#woodpecker_state{
+                gun_pids = maps:without([GunPid], Gun_pids)
+            }
+    end.
 
 %% get requests quota
 requests_in_period(Ets, DateFrom) ->
@@ -623,18 +648,18 @@ run_task(State, 'order_stage', [[]|T2]) ->
 
 % when tasks list is empty, just return #woodpecker_state.api_requests_quota.
 run_task(State = #woodpecker_state{
-       max_paralell_requests = Max_paralell_requests,
+       max_paralell_requests_per_conn = Max_paralell_requests_per_conn,
        ets = Ets
     }, _Stage, []) ->
-    State#woodpecker_state{paralell_requests_quota = Max_paralell_requests - active_requests(Ets)};
+    State#woodpecker_state{paralell_requests_quota = Max_paralell_requests_per_conn - active_requests(Ets)};
 
 % when we do not have free slots
 run_task(State = #woodpecker_state{
         api_requests_quota = Api_requests_quota,
         paralell_requests_quota = Paralell_requests_quota,
-        max_paralell_requests = Max_paralell_requests
+        max_paralell_requests_per_conn = Max_paralell_requests_per_conn
     }, _Stage, _Tasks) when Api_requests_quota =< 0 orelse Paralell_requests_quota =< 0 -> 
-    State#woodpecker_state{paralell_requests_quota = Max_paralell_requests};
+    State#woodpecker_state{paralell_requests_quota = Max_paralell_requests_per_conn};
 
 % run_task order_stage (when have free slots we able to select tasks with current parameters)
 run_task(State = #woodpecker_state{
