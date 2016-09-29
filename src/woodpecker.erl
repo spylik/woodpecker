@@ -27,7 +27,7 @@
 -endif.
 
 -include("woodpecker.hrl").
--include("deps/teaser/include/utils.hrl").
+%-include("deps/teaser/include/utils.hrl").
 
 %% gen server is here
 -behaviour(gen_server).
@@ -369,7 +369,7 @@ connect(#woodpecker_state{
     error_logger:info_msg("Going connect to ~p:~p",[Connect_to,Connect_to_port]),
     {ok, Pid} = gun:open(Connect_to, Connect_to_port, #{retry=>0}),
 	GunMonRef = monitor(process, Pid),
-    NewState = case gun:await_up(Pid, 10000, GunMonRef) of
+    case gun:await_up(Pid, 10000, GunMonRef) of
         {ok, Protocol} ->
             error_logger:info_msg("Connected to ~p:~p ~p",[Connect_to,Connect_to_port,Protocol]),
             State#woodpecker_state{
@@ -381,7 +381,7 @@ connect(#woodpecker_state{
             demonitor(GunMonRef, [flush]),
             gun:close(Pid),
             State
-    end, ?debug(NewState), NewState;
+    end;
 connect(State) -> State.
 
 % @doc do request
@@ -504,7 +504,6 @@ flush_gun(#woodpecker_state{
             gun_pids = Gun_pids,
             current_gun_pid = Current_gun_pid
         } = State, GunPid) ->
-    ?debug(State),
     #gun_pid_prop{gun_mon = MonRef} = maps:get(GunPid, Gun_pids, #gun_pid_prop{}),
     Alive = is_process_alive(GunPid),
     _ = case MonRef =/= 'undefined' of

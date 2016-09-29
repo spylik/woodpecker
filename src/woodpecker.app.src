@@ -1,6 +1,6 @@
 {application,woodpecker,
              [{description,"An Erlang HTTP woodpecker with Gun"},
-              {vsn,"0.2.6"},
+              {vsn,"0.2.7"},
               {id,"git"},
               {modules,[]},
               {registered,[woodpecker]},
