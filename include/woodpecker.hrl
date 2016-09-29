@@ -38,7 +38,13 @@
         retry_count = 0         :: non_neg_integer() | mspec()
     }).
 -type wp_api_tasks() :: #wp_api_tasks{}.
--type req_per_conn_quota() :: 'infinity' | pos_integer().
+-type req_per_gun_quota() :: 'infinity' | non_neg_integer().
+
+-record(gun_pid_prop, {
+        gun_mon :: 'undefined' | reference(),
+        req_per_gun_quota = 'infinity' :: req_per_gun_quota()
+    }).
+-type gun_pid_prop() :: #gun_pid_prop{}.
 
 -record(woodpecker_state, {
         % user specification section
@@ -53,9 +59,9 @@
         requests_allowed_in_period = 600000 :: pos_integer(),               % period (milli-seconds)
         max_connection_per_host = 1 :: pos_integer(),                       % maximum connection per host (for every conneciton it will spawn new gun)
         max_paralell_requests_per_conn = 8 :: pos_integer(),                % maximim paralell requests per connection
-        max_total_req_per_conn = 'infinity' :: req_per_conn_quota(),        % max requests before we do gun:close. 
-        timeout_for_got_gun_response_requests = 20000 :: pos_integer(),     % timeout for requests with status "got_gun_response" (milli-seconds)
+        max_total_req_per_conn = 'infinity' :: req_per_gun_quota(),         % max requests before we do gun:close. 
         timeout_for_processing_requests = 20000 :: pos_integer(),           % timeout for requests with status "processing" (milli-seconds)
+        timeout_for_got_gun_response_requests = 20000 :: pos_integer(),     % timeout for requests with status "got_gun_response" (milli-seconds)
         timeout_for_nofin_requests = 20000 :: pos_integer(),                % timeout for requests with status "nofin" (milli-seconds)
         freeze_for_incomplete_requests = 1000 :: pos_integer(),             % Freezing for incomplete requests (retry_count * this variable, milli-seconds)
         max_freeze_for_incomplete_requests = 3600000 :: pos_integer(),      % Max freeze timeout for incomplete requests
@@ -65,8 +71,7 @@
         % woodpecker operations section
         ets :: atom() | 'undefined',                                        % generated ets_name saved in state
         current_gun_pid :: pid() | 'undefined',                             % current gun connection Pid
-        gun_pids = #{} :: #{} | #{pid() => reference()},                    % gun connections pids
-        total_req_per_conn_quota = #{} :: #{} | #{pid() => req_per_conn_quota()},
+        gun_pids = #{} :: #{} | #{pid() => gun_pid_prop()},                % gun_connection_pids and properties 
         api_requests_quota :: integer() | 'undefined',                      % current api requests quota
         paralell_requests_quota :: integer() | 'undefined',                 % current max_paralell_requests
         heartbeat_tref :: reference() | 'undefined'                         % last heartbeat time refference

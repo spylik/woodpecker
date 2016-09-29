@@ -294,8 +294,8 @@ handle_info({'DOWN', _MonRef, 'process', ConnPid, 'normal'}, State) ->
     {noreply, flush_gun(State, ConnPid)};
 
 % @doc unexepted 'DOWN'
-handle_info({'DOWN', _MonRef, 'process', ConnPid, _Reason}, State) ->
-    %error_logger:error_msg("got DOWN for ConnPid ~p, MonRef ~p with Reason: ~p",[ConnPid, MonRef, Reason]),
+handle_info({'DOWN', MonRef, 'process', ConnPid, Reason}, State) ->
+    error_logger:error_msg("got DOWN for ConnPid ~p, MonRef ~p with Reason: ~p",[ConnPid, MonRef, Reason]),
     {noreply, flush_gun(State, ConnPid)};
 
 % @doc handle_info for all other thigs
@@ -364,25 +364,24 @@ connect(#woodpecker_state{
         connect_to = Connect_to,
         connect_to_port = Connect_to_port,
         current_gun_pid = 'undefined',
+        max_total_req_per_conn = Max_total_req_per_conn,
         gun_pids = Gun_pids} = State) ->
-%    error_logger:info_msg("Going connect to ~p:~p",[Connect_to,Connect_to_port]),
+    error_logger:info_msg("Going connect to ~p:~p",[Connect_to,Connect_to_port]),
     {ok, Pid} = gun:open(Connect_to, Connect_to_port, #{retry=>0}),
 	GunMonRef = monitor(process, Pid),
-    case gun:await_up(Pid, 10000, GunMonRef) of
-        {ok, _Protocol} ->
-%            error_logger:info_msg("Connected to ~p:~p ~p",[Connect_to,Connect_to_port,Protocol]),
+    NewState = case gun:await_up(Pid, 10000, GunMonRef) of
+        {ok, Protocol} ->
+            error_logger:info_msg("Connected to ~p:~p ~p",[Connect_to,Connect_to_port,Protocol]),
             State#woodpecker_state{
                 current_gun_pid = Pid, 
-                gun_pids = Gun_pids#{Pid => GunMonRef}
+                gun_pids = Gun_pids#{Pid => #gun_pid_prop{gun_mon = GunMonRef, req_per_gun_quota = Max_total_req_per_conn}}
             };
         {'error', Reason} ->
-%            error_logger:warning_msg("Some error '~p' occur in gun during connection ~p:~p",[Reason, Connect_to, Connect_to_port]),
-            flush_gun(
-                State#woodpecker_state{
-                    current_gun_pid = Pid, 
-                    gun_pids = Gun_pids#{Pid => GunMonRef}
-                }, Pid)
-    end;
+            error_logger:warning_msg("Some error '~p' occur in gun during connection ~p:~p",[Reason, Connect_to, Connect_to_port]),
+            demonitor(GunMonRef, [flush]),
+            gun:close(Pid),
+            State
+    end, ?debug(NewState), NewState;
 connect(State) -> State.
 
 % @doc do request
@@ -399,7 +398,8 @@ request(#woodpecker_state{current_gun_pid='undefined'} = State, Task) ->
         ]),
     State;
 request(#woodpecker_state{
-        current_gun_pid = GunPid, 
+        current_gun_pid = GunPid,
+        gun_pids = GunPids,
         api_requests_quota = Api_requests_quota,
         ets = Ets,
         paralell_requests_quota = Paralell_requests_quota
@@ -419,11 +419,39 @@ request(#woodpecker_state{
             retry_count = Retry_count + 1
         }),
 
-%#{GunPid := Conn_quota} = Total_req_per_conn_quota
+    #{GunPid := #gun_pid_prop{req_per_gun_quota = RPGQ} = GunPidProp} = GunPids,
+    case RPGQ of 
+        'infinity' -> 
+            State#woodpecker_state{
+                api_requests_quota = Api_requests_quota-1, 
+                paralell_requests_quota = Paralell_requests_quota-1
+            };
+        _ ->
+            NewRPGQ = RPGQ-1,
+            check_reach_rpgq_quota(
+                State#woodpecker_state{
+                    api_requests_quota = Api_requests_quota-1, 
+                    paralell_requests_quota = Paralell_requests_quota-1,
+                    gun_pids = GunPids#{GunPid => GunPidProp#gun_pid_prop{req_per_gun_quota = NewRPGQ}}
+                }, 
+                GunPid, NewRPGQ
+            )
+    end.
+
+% @doc check is we need new gun_pid for next requests
+check_reach_rpgq_quota(#woodpecker_state{
+        timeout_for_processing_requests = Timeout_for_processing_requests,
+        timeout_for_got_gun_response_requests = Timeout_for_got_gun_response_requests,
+        timeout_for_nofin_requests = Timeout_for_nofin_requests
+    } = State, GunPid, 0) ->
+    TotalWaitTime = 10000 + Timeout_for_processing_requests + Timeout_for_got_gun_response_requests + Timeout_for_nofin_requests,
+    {'ok',_Tref} = timer:apply_after(TotalWaitTime, gun, close, [GunPid]),
     State#woodpecker_state{
-        api_requests_quota = Api_requests_quota-1, 
-        paralell_requests_quota = Paralell_requests_quota-1
-    }.
+        current_gun_pid = 'undefined'
+    };
+
+check_reach_rpgq_quota(State, _GunPid, _RPGQ) ->
+    State.
 
 % @doc get_quota with respect of previous requests
 -spec get_quota(State) -> Result when
@@ -457,18 +485,18 @@ flush_gun(#woodpecker_state{
             gun_pids = Gun_pids
         } = State, 'undefined') ->
     error_logger:error_msg("Going to flush all gun processes"),
-    _ = lists:map(fun({Pid, MonRef}) ->
-            demonitor(MonRef, [flush]),
+    _ = lists:map(fun({Pid, #gun_pid_prop{gun_mon = MonRef}}) ->
             _ = case is_process_alive(Pid) of
-                true -> gun:close(Pid);
+                true -> 
+                    demonitor(MonRef, [flush]),
+                    gun:close(Pid);
                 false -> ok
             end,
             gun:close(Pid)
     end, maps:to_list(Gun_pids)),
     State#woodpecker_state{
         gun_pids = maps:new(), 
-        current_gun_pid = 'undefined',
-        total_req_per_conn_quota = maps:new()
+        current_gun_pid = 'undefined'
     };
 
 % @doc gun clean_up for specified gun_pid
@@ -476,23 +504,26 @@ flush_gun(#woodpecker_state{
             gun_pids = Gun_pids,
             current_gun_pid = Current_gun_pid
         } = State, GunPid) ->
-    MonRef = maps:get(GunPid, Gun_pids, 'undefined'),
-    demonitor(MonRef, [flush]),
-    _ = case is_process_alive(GunPid) of
-        true -> gun:close(GunPid);
-        false -> ok
+    ?debug(State),
+    #gun_pid_prop{gun_mon = MonRef} = maps:get(GunPid, Gun_pids, #gun_pid_prop{}),
+    Alive = is_process_alive(GunPid),
+    _ = case MonRef =/= 'undefined' of
+        true when Alive =:= true ->
+            demonitor(MonRef, [flush]),
+            gun:close(GunPid);
+        false when Alive =:= true ->
+            gun:close(GunPid);
+        _ -> ok
     end,
     case GunPid =:= Current_gun_pid of
         true -> 
             State#woodpecker_state{
                 current_gun_pid = 'undefined',
-                gun_pids = maps:without([GunPid], Gun_pids),
-                total_req_per_conn_quota = maps:without([GunPid], Gun_pids)
+                gun_pids = maps:without([GunPid], Gun_pids)
             };
         false ->
             State#woodpecker_state{
-                gun_pids = maps:without([GunPid], Gun_pids),
-                total_req_per_conn_quota = maps:without([GunPid], Gun_pids)
+                gun_pids = maps:without([GunPid], Gun_pids)
             }
     end.
 
