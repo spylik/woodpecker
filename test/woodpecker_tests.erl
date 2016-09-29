@@ -20,7 +20,7 @@
 % --------------------------------- fixtures ----------------------------------
 
 % tests for cover standart otp behaviour
-otp_test_() ->
+otp_tes() ->
     {setup,
         fun() -> error_logger:tty(false) end,
         {inorder,
@@ -324,6 +324,7 @@ tests_with_gun_and_cowboy_test_() ->
                 end},
                 {<<"Must respect requests_allowed_by_api/requests_allowed_in_period for normal priority requests">>,
                     fun() ->
+                        application:ensure_all_started(gun),
                         QueryParam = erlang:unique_integer([monotonic,positive]),
                         MQParam = integer_to_binary(QueryParam),
                         WaitAt = tutils:spawn_wait_loop_max(10,?SpawnWaitLoop),
@@ -337,12 +338,14 @@ tests_with_gun_and_cowboy_test_() ->
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(SendReq, length(Tasks)),
-                        Tst = ets:select(ETSTable,[{#wp_api_tasks{status = 'new', priority = 'normal',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
-                        ?assertEqual(SendReq, length(Tst)),
-                         Server ! 'heartbeat',
-                        timer:sleep(5),
-                        Tst2 = ets:select(ETSTable,[{#wp_api_tasks{status = 'new', priority = 'normal',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
-                        ?assertEqual(SendReq, length(Tst2)+Requests_allowed_by_api),
+                        Tst1 = ets:select(ETSTable,[{#wp_api_tasks{status = 'new', priority = 'normal',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
+                        ?assertEqual(SendReq, length(Tst1)),
+                        Server ! 'heartbeat',
+                        timer:sleep(20),
+                        Tst2 = ets:select(ETSTable,[{#wp_api_tasks{status = '$3', priority = 'normal',max_retry = '$2',retry_count = '$1', _ = '_'},[{'=/=', '$3', 'new'},{'<','$1',10},{'<','$1','$2'}],['$_']}]),
+                        ?assertEqual(Requests_allowed_by_api, length(Tst2)),
+                        Tst3 = ets:select(ETSTable,[{#wp_api_tasks{status = 'new', priority = 'normal',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
+                        ?assertEqual(SendReq, length(Tst3)+Requests_allowed_by_api),
  
                         [Acc] = tutils:recieve_loop([], ?RecieveLoop, WaitAt),
                         ?TESTMODULE:stop(Server),
@@ -373,7 +376,7 @@ tests_with_gun_and_cowboy_test_() ->
                         Tst = ets:select(ETSTable,[{#wp_api_tasks{status = 'new', priority = 'low',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
                         ?assertEqual(SendReq, length(Tst)),
                          Server ! 'heartbeat',
-                        timer:sleep(5),
+                        timer:sleep(50),
                         Tst2 = ets:select(ETSTable,[{#wp_api_tasks{status = 'new', priority = 'low',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
                         ?assertEqual(SendReq, length(Tst2)+Requests_allowed_by_api),
  
@@ -387,17 +390,17 @@ tests_with_gun_and_cowboy_test_() ->
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
                             ?assertEqual(FirstPid, maps:get(pid, Data))
                         end, Acc)
-                end},
-                {<<"Request order test">>,
-                    fun() ->
-                        ok
-                    end
-                }
+                end}
+%               {<<"Request order test">>,
+%                   fun() ->
+%                       ok
+%                   end
+%               }
             ]
         }
     }.
 
-tests_with_gun_and_slowcowboy_test_() ->
+tests_with_gun_and_slowcowboy_tes() ->
     {setup,
         % setup
         fun() ->

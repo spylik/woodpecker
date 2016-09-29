@@ -294,8 +294,8 @@ handle_info({'DOWN', _MonRef, 'process', ConnPid, 'normal'}, State) ->
     {noreply, flush_gun(State, ConnPid)};
 
 % @doc unexepted 'DOWN'
-handle_info({'DOWN', MonRef, 'process', ConnPid, Reason}, State) ->
-    error_logger:error_msg("got DOWN for ConnPid ~p, MonRef ~p with Reason: ~p",[ConnPid, MonRef, Reason]),
+handle_info({'DOWN', _MonRef, 'process', ConnPid, _Reason}, State) ->
+    %error_logger:error_msg("got DOWN for ConnPid ~p, MonRef ~p with Reason: ~p",[ConnPid, MonRef, Reason]),
     {noreply, flush_gun(State, ConnPid)};
 
 % @doc handle_info for all other thigs
@@ -310,7 +310,7 @@ handle_info(Msg, State) ->
     State :: term().
 
 terminate(_Reason, State) ->
-    _ = flush_gun(State, undefined),
+%    _ = flush_gun(State, 'undefined'),
     _ = erlang:cancel_timer(State#woodpecker_state.heartbeat_tref).
 
 % @doc call back for code_change
@@ -348,31 +348,35 @@ create_task({Method, Priority, Url, Headers, Body}, State = #woodpecker_state{et
     Quota = get_quota(State),
     case Priority of
         'urgent' ->
-            gun_request(Task, State#woodpecker_state{api_requests_quota = Quota});
+            request(connect(State#woodpecker_state{api_requests_quota = Quota}), Task);
         'high' when Quota > 0 ->
-            gun_request(Task, State#woodpecker_state{api_requests_quota = Quota});
+            request(connect(State#woodpecker_state{api_requests_quota = Quota}), Task);
         _ ->
             State
     end.
 
 % @doc open new connection to the server or do nothing if connection present
+-spec connect(State) -> Result when
+    State :: woodpecker_state(),
+    Result :: woodpecker_state().
+
 connect(#woodpecker_state{
         connect_to = Connect_to,
         connect_to_port = Connect_to_port,
         current_gun_pid = 'undefined',
         gun_pids = Gun_pids} = State) ->
-    error_logger:info_msg("Going connect to ~p:~p",[Connect_to,Connect_to_port]),
+%    error_logger:info_msg("Going connect to ~p:~p",[Connect_to,Connect_to_port]),
     {ok, Pid} = gun:open(Connect_to, Connect_to_port, #{retry=>0}),
 	GunMonRef = monitor(process, Pid),
-    case gun:await_up(Pid) of
-        {ok, Protocol} ->
-            error_logger:info_msg("Connected to ~p:~p ~p",[Connect_to,Connect_to_port,Protocol]),
+    case gun:await_up(Pid, 10000, GunMonRef) of
+        {ok, _Protocol} ->
+%            error_logger:info_msg("Connected to ~p:~p ~p",[Connect_to,Connect_to_port,Protocol]),
             State#woodpecker_state{
                 current_gun_pid = Pid, 
                 gun_pids = Gun_pids#{Pid => GunMonRef}
             };
-        {error, 'timeout'} ->
-            error_logger:warning_msg("Timeout during conneciton to ~p:~p",[Connect_to,Connect_to_port]),
+        {'error', Reason} ->
+%            error_logger:warning_msg("Some error '~p' occur in gun during connection ~p:~p",[Reason, Connect_to, Connect_to_port]),
             flush_gun(
                 State#woodpecker_state{
                     current_gun_pid = Pid, 
@@ -381,9 +385,45 @@ connect(#woodpecker_state{
     end;
 connect(State) -> State.
 
-gun_request(Task, State) ->
-    update_request_to_processing(State, Task, Task#wp_api_tasks.ref),
-    request(connect(State), Task).
+% @doc do request
+-spec request(State, Task) -> Result when
+    State   :: woodpecker_state(),
+    Task    :: wp_api_tasks(),
+    Result  :: woodpecker_state().
+
+request(#woodpecker_state{current_gun_pid='undefined'} = State, Task) ->
+    ets:update_element(State#woodpecker_state.ets, Task#wp_api_tasks.ref, [
+            {#wp_api_tasks.status, 'need_retry'},
+            {#wp_api_tasks.response_headers, 'undefined'},
+            {#wp_api_tasks.data, 'undefined'}
+        ]),
+    State;
+request(#woodpecker_state{
+        current_gun_pid = GunPid, 
+        api_requests_quota = Api_requests_quota,
+        ets = Ets,
+        paralell_requests_quota = Paralell_requests_quota
+    } = State, #wp_api_tasks{method = 'get', url = Url, headers = Headers, ref = OldReqRef, retry_count = Retry_count} = Task) ->
+    ReqRef = case Headers of 
+        'undefined' -> 
+            gun:get(GunPid, Url);
+        _ -> 
+            gun:get(GunPid, Url, Headers)
+    end,
+    ets:delete(Ets, OldReqRef),
+    ets:insert(State#woodpecker_state.ets, 
+        Task#wp_api_tasks{
+            ref = ReqRef,
+            status = 'processing',
+            request_date = get_time(),
+            retry_count = Retry_count + 1
+        }),
+
+%#{GunPid := Conn_quota} = Total_req_per_conn_quota
+    State#woodpecker_state{
+        api_requests_quota = Api_requests_quota-1, 
+        paralell_requests_quota = Paralell_requests_quota-1
+    }.
 
 % @doc get_quota with respect of previous requests
 -spec get_quota(State) -> Result when
@@ -405,81 +445,54 @@ get_quota(#woodpecker_state{
     RequestsInPeriod = requests_in_period(Ets,NewThan),
     Requests_allowed_by_api-RequestsInPeriod.
 
-% @doc do request
-request(#woodpecker_state{current_gun_pid='undefined'} = State, Task) ->
-    ets:update_element(State#woodpecker_state.ets, Task#wp_api_tasks.ref, [
-            {#wp_api_tasks.status, 'need_retry'},
-            {#wp_api_tasks.response_headers, 'undefined'},
-            {#wp_api_tasks.data, 'undefined'}
-        ]), 
-    State;
-request(#woodpecker_state{
-        current_gun_pid = GunPid, 
-        api_requests_quota = Api_requests_quota,
-        paralell_requests_quota = Paralell_requests_quota
-    } = State, #wp_api_tasks{method = 'get', url = Url, headers = Headers} = Task) ->
-    ReqRef = case Headers of 
-        'undefined' -> gun:get(GunPid, Url);
-        _ -> gun:get(GunPid, Url, Headers)
-    end,
-    update_request_to_processing(State, Task, ReqRef),
-    State#woodpecker_state{api_requests_quota = Api_requests_quota-1, paralell_requests_quota = Paralell_requests_quota-1}.
-
 % @doc chunk data
 chunk_data(undefined, NewData) ->
     NewData;
 chunk_data(OldData, NewData) ->
     <<OldData/binary, NewData/binary>>.
 
-% @doc update request in ets to processing
-update_request_to_processing(State, Task, ReqRef) ->
-    case Task#wp_api_tasks.ref =/= ReqRef of
-        true ->
-            ets:delete(State#woodpecker_state.ets, Task#wp_api_tasks.ref);
-        false ->
-            ok
-    end,
-    ets:insert(State#woodpecker_state.ets, 
-        Task#wp_api_tasks{
-            ref = ReqRef,
-            status = 'processing',
-            request_date = get_time(),
-            retry_count = Task#wp_api_tasks.retry_count + 1
-        }).
-
 % @doc gun clean_up when do not specify which GunPid we would like to cleanup
 % going to clean_up all guns
 flush_gun(#woodpecker_state{
-            gun_pids = Gun_pids,
-            max_total_req_per_conn = Max_total_req_per_conn
+            gun_pids = Gun_pids
         } = State, 'undefined') ->
-    lists:map(fun({Pid, MonRef}) ->
-            demonitor(MonRef),
+    error_logger:error_msg("Going to flush all gun processes"),
+    _ = lists:map(fun({Pid, MonRef}) ->
+            demonitor(MonRef, [flush]),
+            _ = case is_process_alive(Pid) of
+                true -> gun:close(Pid);
+                false -> ok
+            end,
             gun:close(Pid)
     end, maps:to_list(Gun_pids)),
     State#woodpecker_state{
         gun_pids = maps:new(), 
         current_gun_pid = 'undefined',
-        total_req_per_conn_quota = Max_total_req_per_conn};
+        total_req_per_conn_quota = maps:new()
+    };
 
 % @doc gun clean_up for specified gun_pid
 flush_gun(#woodpecker_state{
             gun_pids = Gun_pids,
-            current_gun_pid = Current_gun_pid,
-            max_total_req_per_conn = Max_total_req_per_conn
+            current_gun_pid = Current_gun_pid
         } = State, GunPid) ->
     MonRef = maps:get(GunPid, Gun_pids, 'undefined'),
-    demonitor(MonRef),
-    gun:close(GunPid),
+    demonitor(MonRef, [flush]),
+    _ = case is_process_alive(GunPid) of
+        true -> gun:close(GunPid);
+        false -> ok
+    end,
     case GunPid =:= Current_gun_pid of
         true -> 
             State#woodpecker_state{
                 current_gun_pid = 'undefined',
-                gun_pids = maps:without([GunPid], Gun_pids)
+                gun_pids = maps:without([GunPid], Gun_pids),
+                total_req_per_conn_quota = maps:without([GunPid], Gun_pids)
             };
         false ->
             State#woodpecker_state{
-                gun_pids = maps:without([GunPid], Gun_pids)
+                gun_pids = maps:without([GunPid], Gun_pids),
+                total_req_per_conn_quota = maps:without([GunPid], Gun_pids)
             }
     end.
 
@@ -672,7 +685,7 @@ run_task(State = #woodpecker_state{
 
 %% run_task cast_stage
 run_task(State, 'cast_stage', [H|T]) ->
-    run_task(gun_request(H, State), 'cast_stage', T).
+    run_task(request(connect(State), H), 'cast_stage', T).
 
 %% generate ETS table name
 generate_ets_name(Server) ->

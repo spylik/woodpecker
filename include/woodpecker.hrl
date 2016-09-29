@@ -38,6 +38,7 @@
         retry_count = 0         :: non_neg_integer() | mspec()
     }).
 -type wp_api_tasks() :: #wp_api_tasks{}.
+-type req_per_conn_quota() :: 'infinity' | pos_integer().
 
 -record(woodpecker_state, {
         % user specification section
@@ -52,7 +53,7 @@
         requests_allowed_in_period = 600000 :: pos_integer(),               % period (milli-seconds)
         max_connection_per_host = 1 :: pos_integer(),                       % maximum connection per host (for every conneciton it will spawn new gun)
         max_paralell_requests_per_conn = 8 :: pos_integer(),                % maximim paralell requests per connection
-        max_total_req_per_conn = 'infinity' :: 'infinity' | pos_integer(),  % max requests before we do gun:close. 
+        max_total_req_per_conn = 'infinity' :: req_per_conn_quota(),        % max requests before we do gun:close. 
         timeout_for_got_gun_response_requests = 20000 :: pos_integer(),     % timeout for requests with status "got_gun_response" (milli-seconds)
         timeout_for_processing_requests = 20000 :: pos_integer(),           % timeout for requests with status "processing" (milli-seconds)
         timeout_for_nofin_requests = 20000 :: pos_integer(),                % timeout for requests with status "nofin" (milli-seconds)
@@ -64,10 +65,10 @@
         % woodpecker operations section
         ets :: atom() | 'undefined',                                        % generated ets_name saved in state
         current_gun_pid :: pid() | 'undefined',                             % current gun connection Pid
-        gun_pids = #{} :: #{} | #{pid() => reference()},                    % current gun connection Pid
+        gun_pids = #{} :: #{} | #{pid() => reference()},                    % gun connections pids
+        total_req_per_conn_quota = #{} :: #{} | #{pid() => req_per_conn_quota()},
         api_requests_quota :: integer() | 'undefined',                      % current api requests quota
         paralell_requests_quota :: integer() | 'undefined',                 % current max_paralell_requests
-        total_req_per_conn_quota = 'infinity' :: 'infinity' | pos_integer(),% current total_req_per_conn_quota
         heartbeat_tref :: reference() | 'undefined'                         % last heartbeat time refference
         
     }).
