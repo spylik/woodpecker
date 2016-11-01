@@ -293,6 +293,10 @@ handle_info({'gun_down',ConnPid,_,_,_,_}, State) ->
 handle_info({'DOWN', _MonRef, 'process', ConnPid, 'normal'}, State) ->
     {noreply, flush_gun(State, ConnPid)};
 
+% @doc expected down with state 'shutdown'
+handle_info({'DOWN', _MonRef, 'process', ConnPid, 'shutdown'}, State) ->
+    {noreply, flush_gun(State, ConnPid)};
+
 % @doc unexepted 'DOWN'
 handle_info({'DOWN', MonRef, 'process', ConnPid, Reason}, State) ->
     error_logger:error_msg("got DOWN for ConnPid ~p, MonRef ~p with Reason: ~p",[ConnPid, MonRef, Reason]),
