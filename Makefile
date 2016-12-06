@@ -9,6 +9,7 @@ ERLC_OPTS ?= +warn_export_all +warn_export_vars +warn_unused_import +warn_untype
 
 TEST_ERLC_OPTS += +'{parse_transform, lager_transform}' 
 TEST_ERLC_OPTS += +'{parse_transform, erlroute_transform}'
+TEST_ERLC_OPTS += +debug_info
 
 # --------------------------------------------------------------------
 # Dependencies.
