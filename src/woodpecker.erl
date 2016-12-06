@@ -336,6 +336,15 @@ code_change(_OldVsn, State, _Extra) ->
 % ----------------------- other private functions ---------------------------
 
 % @doc create task
+-spec create_task({Method, Priority, Url, Headers, Body}, State) -> Result when
+    Method      :: method(),
+    Priority    :: priority(),
+    Url         :: url(),
+    Headers     :: headers(),
+    Body        :: body(),
+    State       :: woodpecker_state(),
+    Result      :: woodpecker_state().
+
 create_task({Method, Priority, Url, Headers, Body}, State = #woodpecker_state{ets = Ets}) ->
     TempRef = erlang:make_ref(),
     ets:insert(Ets, 
@@ -443,6 +452,12 @@ request(#woodpecker_state{
     end.
 
 % @doc check is we need new gun_pid for next requests
+-spec check_reach_rpgq_quota(State, GunPid, NewRPGQ) -> Result when
+    State   :: woodpecker_state(),
+    GunPid  :: gun_pid(),
+    NewRPGQ :: non_neg_integer(),
+    Result  :: woodpecker_state().
+
 check_reach_rpgq_quota(#woodpecker_state{
         timeout_for_processing_requests = Timeout_for_processing_requests,
         timeout_for_got_gun_response_requests = Timeout_for_got_gun_response_requests,
@@ -477,14 +492,24 @@ get_quota(#woodpecker_state{
     RequestsInPeriod = requests_in_period(Ets,NewThan),
     Requests_allowed_by_api-RequestsInPeriod.
 
-% @doc chunk data
-chunk_data(undefined, NewData) ->
+% @doc join chunked data
+-spec chunk_data (OldData, NewData) -> Result when
+    OldData :: 'undefined' | binary(),
+    NewData :: binary(),
+    Result  :: binary().
+
+chunk_data('undefined', NewData) ->
     NewData;
 chunk_data(OldData, NewData) ->
     <<OldData/binary, NewData/binary>>.
 
-% @doc gun clean_up when do not specify which GunPid we would like to cleanup
-% going to clean_up all guns
+% @doc going to clean_up all guns
+% when do not specify which GunPid we will clean all gun processes
+-spec flush_gun(State, GunPid) -> Result when
+    State   :: woodpecker_state(),
+    GunPid  :: gun_pid(),
+    Result  :: woodpecker_state().
+
 flush_gun(#woodpecker_state{
             gun_pids = Gun_pids
         } = State, 'undefined') ->
@@ -530,7 +555,12 @@ flush_gun(#woodpecker_state{
             }
     end.
 
-%% get requests quota
+% @doc get requests quota
+-spec requests_in_period(Ets, DateFrom) -> Result when
+    Ets         :: atom(),
+    DateFrom    :: pos_integer(),
+    Result      :: non_neg_integer().
+
 requests_in_period(Ets, DateFrom) ->
     MS = [{
             #wp_api_tasks{status = '$2', last_response_date = '$1', request_date = '$3', _ = '_'},
@@ -553,6 +583,11 @@ requests_in_period(Ets, DateFrom) ->
         ],
     ets:select_count(Ets, MS).
 
+% @doc get active requests
+-spec active_requests(Ets) -> Result when
+    Ets         :: atom(),
+    Result      :: non_neg_integer().
+
 active_requests(Ets) ->
     MS = [{
             #wp_api_tasks{status = '$1', _ = '_'},
@@ -568,7 +603,11 @@ active_requests(Ets) ->
         ],
     ets:select_count(Ets, MS).
 
-%% retry staled requests
+% @doc retry staled requests
+-spec retry_staled_requests(State) -> Result when
+    State   :: woodpecker_state(),
+    Result  :: list().
+
 retry_staled_requests(_State = #woodpecker_state{
         timeout_for_nofin_requests = Timeout_for_nofin_requests,
         timeout_for_processing_requests = Timeout_for_processing_requests,
@@ -606,7 +645,12 @@ retry_staled_requests(_State = #woodpecker_state{
         end,
         ets:select(Ets, MS)).
 
-%% clean completed request (match spec)
+% @doc clean completed request (match spec)
+-spec clean_completed(Ets, OldThan) -> Result when
+    Ets         :: atom(),
+    OldThan     :: pos_integer(),
+    Result      :: list().
+
 clean_completed(Ets,OldThan) ->
     MS = [{
             #wp_api_tasks{ref = '$1', status = 'got_fin_data', request_date = '$3', _ = '_'},
@@ -620,7 +664,11 @@ clean_completed(Ets,OldThan) ->
         end,
         ets:select(Ets, MS)).
 
-%% run task from ets-queue
+% @doc run task from ets-queue
+-spec prepare_ms(State) -> Result when
+    State   :: woodpecker_state(),
+    Result  :: [[ets:match_spec()]].
+
 prepare_ms(#woodpecker_state{
         freeze_for_incomplete_requests = Freeze_for_incomplete_requests,
         max_freeze_for_incomplete_requests = Max_freeze_for_incomplete_requests
@@ -721,11 +769,17 @@ run_task(State = #woodpecker_state{
 run_task(State, 'cast_stage', [H|T]) ->
     run_task(request(connect(State), H), 'cast_stage', T).
 
-%% generate ETS table name
+% @doc generate ETS table name
+-spec generate_ets_name(Server) -> Result when
+    Server  :: server(),
+    Result  :: atom().
+
 generate_ets_name(Server) ->
     list_to_atom(lists:append([atom_to_list(Server), "_api_tasks"])).
 
-%% get time
+% @doc get time
+-spec get_time() -> Result when 
+    Result  :: pos_integer().
 get_time() ->
     erlang:convert_time_unit(erlang:system_time(), native, milli_seconds).
 
@@ -757,6 +811,10 @@ generate_nofin_topic(State) ->
 
 %------------------------------- send output -----------------------------
 % @doc send nofin output (when report_nofin_to undefined we do nothing)
+-spec send_nofin_output(State, Frame) -> no_return() when
+    State   :: woodpecker_state(),
+    Frame   :: wp_api_tasks().
+
 send_nofin_output(_State = #woodpecker_state{report_nofin_to='undefined'}, _Frame) ->
     ok;
 send_nofin_output(_State = #woodpecker_state{
@@ -768,7 +826,11 @@ send_nofin_output(_State = #woodpecker_state{
 send_nofin_output(_State = #woodpecker_state{report_nofin_to=ReportNofinTo}, Frame) ->
     ReportNofinTo ! Frame.
 
-%% @doc send output
+% @doc send output
+-spec send_output(State, Frame) -> no_return() when
+    State   :: woodpecker_state(),
+    Frame   :: wp_api_tasks().
+
 send_output(_State = #woodpecker_state{report_to='undefined'}, _Frame) ->
     ok;
 send_output(_State = #woodpecker_state{

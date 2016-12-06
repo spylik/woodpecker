@@ -6,6 +6,7 @@
 -type mspec()       :: '_' | '$1' | '$2' | '$3' | '$4' | '$5'.
 -type server()      :: pid() | atom().
 -type url()         :: nonempty_list().
+-type body()        :: 'undefined' | binary().
 -type isFin()       :: 'fin' | 'nofin'.
 -type stage()       :: 'order_stage' | 'cast_stage'.
 -type newtaskmsg()  :: {'create_task', method(), priority(), url(), headers(), iodata()}.
@@ -28,7 +29,7 @@
         method                  :: method() | mspec(),            % moderate
         url                     :: url() | mspec(),     % moderate
         headers                 :: headers() | mspec(),
-        body                    :: 'undefined' | binary() | mspec(),
+        body                    :: body() | mspec(),
         insert_date             :: pos_integer() | mspec(),
         request_date            :: 'undefined' | pos_integer() | mspec(),
         last_response_date      :: 'undefined' | pos_integer() | mspec(),
