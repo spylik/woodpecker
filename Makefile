@@ -5,11 +5,10 @@ PROJECT = woodpecker
 # --------------------------------------------------------------------
 
 # if ERLC_OPTS not defined in parent project, we going to define by our-self
-ERLC_OPTS ?= +warn_export_all +warn_export_vars +warn_unused_import +warn_untyped_record +warn_missing_spec +warn_missing_spec_all -Werror
+ERLC_OPTS ?= +warn_export_all +warn_export_vars +warn_unused_import +warn_untyped_record +warn_missing_spec +warn_missing_spec_all +debug_info -Werror
 
 TEST_ERLC_OPTS += +'{parse_transform, lager_transform}' 
 TEST_ERLC_OPTS += +'{parse_transform, erlroute_transform}'
-TEST_ERLC_OPTS += +debug_info
 
 # --------------------------------------------------------------------
 # Dependencies.
