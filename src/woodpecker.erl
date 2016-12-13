@@ -43,8 +43,8 @@
         stop/2,
         get_topic/1,
         get_nofin_topic/1,
-        async_get/2,
-        async_get/3
+        get_async/2,
+        get_async/3
     ]).
 
 % ============================ gen_server part =================================
@@ -862,28 +862,28 @@ get_nofin_topic(Server) ->
 get_topic(Server) ->
     gen_server:call(Server, 'get_topic').
 
-% @doc ask woodpecker to async GET data from Url with default 'low' priority
--spec async_get(Server, Url) -> 'ok' when
+% @doc ask woodpecker to async GET data from Url with default 'normal' priority, empty headers
+-spec get_async(Server, Url) -> 'ok' when
     Server  :: server(),
     Url     :: url().
 
-async_get(Server, Url) ->
-    async_get(Server, Url, 'low').
+get_async(Server, Url) ->
+    get_async(Server, Url, 'low').
 
-% @doc ask woodpecker to async GET data from Url with default 'low' priority empty headers
--spec async_get(Server, Url, Priority) -> 'ok' when
+% @doc ask woodpecker to async GET data from Url with empty headers
+-spec get_async(Server, Url, Priority) -> 'ok' when
     Server      :: server(),
     Url         :: url(),
     Priority    :: priority().
 
-async_get(Server, Url, Priority) -> 
-    async_get(Server, Url, Priority, 'undefined').
+get_async(Server, Url, Priority) -> 
+    get_async(Server, Url, Priority, 'undefined').
 
 % @doc ask woodpecker to async GET data from Url (body must be always empty for GET requsts)
--spec async_get(Server, Url, Priority, Headers) -> 'ok' when
+-spec get_async(Server, Url, Priority, Headers) -> 'ok' when
     Server      :: server(),
     Url         :: url(),
     Headers     :: headers(),
     Priority    :: priority().
-async_get(Server, Url, Priority, Headers) ->
+get_async(Server, Url, Priority, Headers) ->
     gen_server:cast(Server, {create_task, get, Priority, Url, Headers, 'undefined'}).
