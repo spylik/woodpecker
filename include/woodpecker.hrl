@@ -6,6 +6,7 @@
 -type mspec()       :: '_' | '$1' | '$2' | '$3' | '$4' | '$5'.
 -type server()      :: pid() | atom().
 -type url()         :: nonempty_list().
+-type tags()        :: term().
 -type body()        :: 'undefined' | binary().
 -type isFin()       :: 'fin' | 'nofin'.
 -type stage()       :: 'order_stage' | 'cast_stage'.
@@ -30,6 +31,7 @@
         url                     :: url() | mspec(),     % moderate
         headers                 :: headers() | mspec(),
         body                    :: body() | mspec(),
+        tags                    :: tags(),
         insert_date             :: pos_integer() | mspec(),
         request_date            :: 'undefined' | pos_integer() | mspec(),
         last_response_date      :: 'undefined' | pos_integer() | mspec(),
