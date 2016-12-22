@@ -1,8 +1,7 @@
 % this record for keep api-request task
-
 -type status()      :: 'new' | 'processing' |'got_gun_response' | 'got_nofin_data' | 'got_fin_data' | 'need_retry'.
 -type priority()    :: 'urgent' | 'high' | 'normal' | 'low'.
--type method()      :: 'get' | 'post'.
+-type method()      :: binary(). % <<"POST">> | <<"GET">>
 -type mspec()       :: '_' | '$1' | '$2' | '$3' | '$4' | '$5'.
 -type server()      :: pid() | atom().
 -type url()         :: nonempty_list().
@@ -11,7 +10,7 @@
 -type isFin()       :: 'fin' | 'nofin'.
 -type stage()       :: 'order_stage' | 'cast_stage'.
 -type newtaskmsg()  :: {'create_task', method(), priority(), url(), headers(), iodata()}.
--type headers()     :: 'undefined' | [{binary(), iodata()}].
+-type headers()     :: [] | [{binary(), iodata()}].
 -type httpstatus()  :: 100..999.
 -type stream_ref()  :: reference().
 -type gun_pid()     :: pid().
@@ -29,7 +28,7 @@
         priority = 'low'        :: priority() | mspec(),
         method                  :: method() | mspec(),            % moderate
         url                     :: url() | mspec(),     % moderate
-        headers                 :: headers() | mspec(),
+        headers = []            :: headers() | mspec(),
         body                    :: body() | mspec(),
         tags                    :: tags(),
         insert_date             :: pos_integer() | mspec(),

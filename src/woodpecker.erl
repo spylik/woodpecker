@@ -422,12 +422,12 @@ request(#woodpecker_state{
         api_requests_quota = Api_requests_quota,
         ets = Ets,
         paralell_requests_quota = Paralell_requests_quota
-    } = State, #wp_api_tasks{method = 'get', url = Url, headers = Headers, ref = OldReqRef, retry_count = Retry_count} = Task) ->
-    ReqRef = case Headers of 
-        'undefined' -> 
-            gun:get(GunPid, Url);
-        _ -> 
-            gun:get(GunPid, Url, Headers)
+    } = State, #wp_api_tasks{method = Method, url = Url, headers = Headers, body = Body, ref = OldReqRef, retry_count = Retry_count} = Task) ->
+    ReqRef = case Body of 
+        'undefined' ->
+            gun:request(GunPid, Method, Url, Headers);
+        _ ->
+            gun:request(GunPid, Method, Url, Headers, Body)
     end,
     ets:delete(Ets, OldReqRef),
     ets:insert(State#woodpecker_state.ets, 
@@ -877,7 +877,7 @@ get_topic(Server) ->
     Body    :: body().
 
 post_async(Server, Url, Body) ->
-    post_async(Server, Url, 'normal', 'undefined', Body, 'undefined').
+    post_async(Server, Url, 'normal', [], Body, 'undefined').
 
 % @doc ask woodpecker to POST data async to the Url with empty headers
 -spec post_async(Server, Url, Body, Priority) -> 'ok' when
@@ -887,7 +887,7 @@ post_async(Server, Url, Body) ->
     Priority    :: priority().
 
 post_async(Server, Url, Body, Priority) -> 
-    post_async(Server, Url, Priority, 'undefined', Body, 'undefined').
+    post_async(Server, Url, Priority, [], Body, 'undefined').
 
 
 % @doc full-featured POST API.
@@ -901,7 +901,7 @@ post_async(Server, Url, Body, Priority) ->
     Tags        :: tags().
 
 post_async(Server, Url, Priority, Headers, Body, Tags) ->
-    gen_server:cast(Server, {create_task, 'post', Priority, Url, Headers, Body, Tags}).
+    gen_server:cast(Server, {create_task, <<"POST">>, Priority, Url, Headers, Body, Tags}).
 
 
 % -------------------------------- GET API -------------------------------
@@ -912,7 +912,7 @@ post_async(Server, Url, Priority, Headers, Body, Tags) ->
     Url     :: url().
 
 get_async(Server, Url) ->
-    get_async(Server, Url, 'normal', 'undefined', 'undefined').
+    get_async(Server, Url, 'normal', [], 'undefined').
 
 % @doc ask woodpecker to async GET data from Url with empty headers
 -spec get_async(Server, Url, Priority) -> 'ok' when
@@ -921,7 +921,7 @@ get_async(Server, Url) ->
     Priority    :: priority().
 
 get_async(Server, Url, Priority) -> 
-    get_async(Server, Url, Priority, 'undefined', 'undefined').
+    get_async(Server, Url, Priority, [], 'undefined').
 
 % @doc full-featured GET API.
 % ask woodpecker to async GET data from Url (body must be always empty for GET requsts)
@@ -933,4 +933,4 @@ get_async(Server, Url, Priority) ->
     Tags        :: tags().
 
 get_async(Server, Url, Priority, Headers, Tags) ->
-    gen_server:cast(Server, {create_task, 'get', Priority, Url, Headers, 'undefined', Tags}).
+    gen_server:cast(Server, {create_task, <<"GET">>, Priority, Url, Headers, 'undefined', Tags}).
