@@ -20,7 +20,7 @@
 % --------------------------------- fixtures ----------------------------------
 
 % tests for cover standart otp behaviour
-otp_tes() ->
+otp_test_() ->
     {setup,
         fun() -> error_logger:tty(false) end,
         {inorder,
@@ -400,7 +400,7 @@ tests_with_gun_and_cowboy_test_() ->
         }
     }.
 
-tests_with_gun_and_slowcowboy_tes() ->
+tests_with_gun_and_slowcowboy_test_() ->
     {setup,
         % setup
         fun() ->
