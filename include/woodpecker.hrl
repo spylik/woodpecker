@@ -20,7 +20,7 @@
 -type gun_data()        :: {'gun_data', gun_pid(), stream_ref(), isFin(), binary()}.
 -type gun_push()        :: {'gun_push', gun_pid(), stream_ref(), stream_ref(), method(), nonempty_list(), nonempty_list(), headers()}.
 -type gun_error()       :: {'gun_error', gun_pid(), stream_ref(), term()} | {'gun_error', gun_pid(), term()}.
--type down()            :: {'DOWN', mon_ref(), 'process', stream_ref(), term()}. 
+-type down()            :: {'DOWN', mon_ref(), 'process', stream_ref(), term()}.
 
 -record(wp_api_tasks, {
         ref                     :: reference() | {'temp',reference()} | mspec(),
@@ -61,7 +61,7 @@
         requests_allowed_in_period = 600000 :: pos_integer(),               % period (milli-seconds)
         max_connection_per_host = 1 :: pos_integer(),                       % maximum connection per host (for every conneciton it will spawn new gun)
         max_paralell_requests_per_conn = 8 :: pos_integer(),                % maximim paralell requests per connection
-        max_total_req_per_conn = 'infinity' :: req_per_gun_quota(),         % max requests before we do gun:close. 
+        max_total_req_per_conn = 'infinity' :: req_per_gun_quota(),         % max requests before we do gun:close.
         timeout_for_processing_requests = 20000 :: pos_integer(),           % timeout for requests with status "processing" (milli-seconds)
         timeout_for_got_gun_response_requests = 20000 :: pos_integer(),     % timeout for requests with status "got_gun_response" (milli-seconds)
         timeout_for_nofin_requests = 20000 :: pos_integer(),                % timeout for requests with status "nofin" (milli-seconds)
@@ -73,10 +73,10 @@
         % woodpecker operations section
         ets :: atom() | 'undefined',                                        % generated ets_name saved in state
         current_gun_pid :: pid() | 'undefined',                             % current gun connection Pid
-        gun_pids = #{} :: #{} | #{pid() => gun_pid_prop()},                % gun_connection_pids and properties 
+        gun_pids = #{} :: #{} | #{pid() => gun_pid_prop()},                 % gun_connection_pids and properties
         api_requests_quota :: integer() | 'undefined',                      % current api requests quota
         paralell_requests_quota :: integer() | 'undefined',                 % current max_paralell_requests
         heartbeat_tref :: reference() | 'undefined'                         % last heartbeat time refference
-        
+
     }).
 -type woodpecker_state() :: #woodpecker_state{}.
