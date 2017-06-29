@@ -386,7 +386,7 @@ connect(#woodpecker_state{
         max_total_req_per_conn = Max_total_req_per_conn,
         gun_pids = Gun_pids} = State) ->
     error_logger:info_msg("Going connect to ~p:~p",[Connect_to,Connect_to_port]),
-    {ok, Pid} = gun:open(Connect_to, Connect_to_port, #{retry=>0}),
+    {ok, Pid} = gun:open(Connect_to, Connect_to_port),
 	GunMonRef = monitor(process, Pid),
     case gun:await_up(Pid, 10000, GunMonRef) of
         {ok, Protocol} ->
