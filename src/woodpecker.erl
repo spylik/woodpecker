@@ -179,7 +179,7 @@ handle_call(Msg, _From, State) ->
     Result  :: {noreply, State} | {stop, normal, State}.
 
 % @doc gen_server callback for create_task message (when we do not allow dupes by req_group_id)
-handle_cast({'create_task', Method, Priority, Url, Headers, Body, #{'nodupes_req_group_id' := NodupesGroupId}, Options}, State = #woodpecker_state{ets = Ets}) ->
+handle_cast({'create_task', Method, Priority, Url, Headers, Body, #{'nodupes_group' := NodupesGroupId}, Options}, State = #woodpecker_state{ets = Ets}) ->
     MS = [{
             #wp_api_tasks{status = '$1', nodupes_group = NodupesGroupId, _ = '_'},
                 [
