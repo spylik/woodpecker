@@ -114,8 +114,8 @@
         data                    :: 'undefined' | binary() | mspec(),
         max_retry = 9999        :: non_neg_integer() | mspec(),
         retry_count = 0         :: non_neg_integer() | mspec(),
-        report_nofin_to         :: 'undefined' | report(),
-        report_to               :: 'undefined' | report()
+        report_nofin_to         :: 'undefined' | report() | mspec(),
+        report_to               :: 'undefined' | report() | mspec()
     }).
 -type wp_api_tasks() :: #wp_api_tasks{}.
 -type req_per_gun_quota() :: 'infinity' | non_neg_integer().
