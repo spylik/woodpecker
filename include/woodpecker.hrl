@@ -30,8 +30,6 @@
         'heartbeat_freq'                        % heartbeat frequency (in milliseconds)
             => 1000 | pos_integer(),
         'cleanup_completed_requests'            % flush data for completed requests?
-            => true | boolean(),
-        'allow_dupes'                           % do we allow dupes for incompleted requests? (same URL, same headers, same tags, same data)
             => true | boolean()
     }.
 
@@ -60,7 +58,6 @@
         max_freeze_for_incomplete_requests      :: 3600000 | pos_integer(), % 3600000 is 1 hour
         heartbeat_freq                          :: 1000 | pos_integer(),
         cleanup_completed_requests              :: 'true' | boolean(),
-        allow_dupes                             :: 'true' | boolean(),
         % woodpecker operations section
         ets                                     :: atom(),
         api_requests_current_quota              :: integer(),
@@ -98,24 +95,30 @@
 -type gun_error()       :: {'gun_error', gun_pid(), stream_ref(), term()} | {'gun_error', gun_pid(), term()}.
 -type down()            :: {'DOWN', mon_ref(), 'process', stream_ref(), term()}.
 
+-type request_opt()     :: #{
+    tags                        => 'undefined' | tags(),
+    nodupes_req_group_id        => 'undefined' | term()
+}.
+
 -record(wp_api_tasks, {
         ref                     :: reference() | {'temp',reference()} | mspec(),
         status = 'new'          :: status() | mspec(),
         priority = 'low'        :: priority() | mspec(),
-        method                  :: method() | mspec(),            % moderate
-        url                     :: url() | mspec(),     % moderate
+        max_retry = 9999        :: non_neg_integer() | mspec(),
+        retry_count = 0         :: non_neg_integer() | mspec(),
+        nodupes_group           :: 'undefined' | term(),
+        insert_date             :: pos_integer() | mspec(),
+        report_nofin_to         :: 'undefined' | report() | mspec(),
+        report_to               :: 'undefined' | report() | mspec(),
+        method                  :: method() | mspec(),
+        url                     :: url() | mspec(),
         headers = []            :: headers() | mspec(),
         body                    :: body() | mspec(),
         tags                    :: tags(),
-        insert_date             :: pos_integer() | mspec(),
         request_date            :: 'undefined' | pos_integer() | mspec(),
         last_response_date      :: 'undefined' | pos_integer() | mspec(),
         response_headers        :: 'undefined' | headers() | mspec(),
-        data                    :: 'undefined' | binary() | mspec(),
-        max_retry = 9999        :: non_neg_integer() | mspec(),
-        retry_count = 0         :: non_neg_integer() | mspec(),
-        report_nofin_to         :: 'undefined' | report() | mspec(),
-        report_to               :: 'undefined' | report() | mspec()
+        data                    :: 'undefined' | binary() | mspec()
     }).
 -type wp_api_tasks() :: #wp_api_tasks{}.
 -type req_per_gun_quota() :: 'infinity' | non_neg_integer().

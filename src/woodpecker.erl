@@ -147,7 +147,6 @@ init({Host, Port, Options}) ->
             max_freeze_for_incomplete_requests = maps:get('max_freeze_for_incomplete_requests', Options, 3600000),
             heartbeat_freq = Heartbeat_freq,
             cleanup_completed_requests = maps:get('cleanup_completed_requests', Options, true),
-            allow_dupes = maps:get('allow_dupes', Options, true),
             % determined at init
             ets = Ets,
             api_requests_current_quota = Requests_allowed_by_api,
@@ -179,10 +178,10 @@ handle_call(Msg, _From, State) ->
     State   :: woodpecker_state(),
     Result  :: {noreply, State} | {stop, normal, State}.
 
-% @doc gen_server callback for create_task message (when we do not allow dupes)
-handle_cast({'create_task', Method, Priority, Url, Headers, Body, Tags}, State = #woodpecker_state{ets = Ets, allow_dupes = false}) ->
+% @doc gen_server callback for create_task message (when we do not allow dupes by req_group_id)
+handle_cast({'create_task', Method, Priority, Url, Headers, Body, #{'nodupes_req_group_id' := NodupesGroupId}, Options}, State = #woodpecker_state{ets = Ets}) ->
     MS = [{
-            #wp_api_tasks{status = '$1', method = Method, priority = Priority, url = Url, headers = Headers, body = Body, tags = Tags, _ = '_'},
+            #wp_api_tasks{status = '$1', nodupes_group = NodupesGroupId, _ = '_'},
                 [
                     {'=/=','$1','got_fin_data'}
                 ],
@@ -190,14 +189,15 @@ handle_cast({'create_task', Method, Priority, Url, Headers, Body, Tags}, State =
             }
         ],
     NewState = case ets:select_count(Ets, MS) > 0 of
-        false -> create_task({Method, Priority, Url, Headers, Body, Tags}, State);
+        false -> create_task({Method, Priority, Url, Headers, Body, Options}, State);
         true -> State
     end,
     {noreply, NewState};
 
+
 % @doc gen_server callback for create_task message (when we allow dupes)
-handle_cast({'create_task', Method, Priority, Url, Headers, Body, Tags}, State = #woodpecker_state{allow_dupes = true}) ->
-    {noreply, create_task({Method, Priority, Url, Headers, Body, Tags}, State)};
+handle_cast({'create_task', Method, Priority, Url, Headers, Body, Options}, State) ->
+    {noreply, create_task({Method, Priority, Url, Headers, Body, Options}, State)};
 
 % @doc handle_cast for stop
 handle_cast(stop, State) ->
@@ -378,17 +378,17 @@ code_change(_OldVsn, State, _Extra) ->
 % ----------------------- other private functions ---------------------------
 
 % @doc create task
--spec create_task({Method, Priority, Url, Headers, Body, Tags}, State) -> Result when
+-spec create_task({Method, Priority, Url, Headers, Body, Options}, State) -> Result when
     Method      :: method(),
     Priority    :: priority(),
     Url         :: url(),
     Headers     :: headers(),
     Body        :: body(),
-    Tags        :: tags(),
+    Options     :: request_opt(),
     State       :: woodpecker_state(),
     Result      :: woodpecker_state().
 
-create_task({Method, Priority, Url, Headers, Body, Tags}, State = #woodpecker_state{ets = Ets, report_nofin_to = ReportNoFinTo, report_to = ReportTo}) ->
+create_task({Method, Priority, Url, Headers, Body, Options}, State = #woodpecker_state{ets = Ets, report_nofin_to = ReportNoFinTo, report_to = ReportTo}) ->
     TempRef = erlang:make_ref(),
     ets:insert(Ets,
         Task = #wp_api_tasks{
@@ -400,7 +400,8 @@ create_task({Method, Priority, Url, Headers, Body, Tags}, State = #woodpecker_st
             insert_date     = get_time(),
             headers         = Headers,
             body            = Body,
-            tags            = Tags,
+            tags            = maps:get('tags', Options, 'undefined'),
+            nodupes_group   = maps:get('nodupes_group', Options, 'undefined'),
             report_nofin_to = ReportNoFinTo,
             report_to       = ReportTo
         }),
@@ -889,7 +890,7 @@ send_output(#woodpecker_state{server = Server}, #wp_api_tasks{
     Body    :: body().
 
 post_async(Server, Url, Body) ->
-    post_async(Server, Url, 'normal', [], Body, 'undefined').
+    post_async(Server, Url, 'normal', [], Body, maps:new()).
 
 % @doc ask woodpecker to POST data async to the Url with empty headers
 -spec post_async(Server, Url, Body, Priority) -> 'ok' when
@@ -899,21 +900,21 @@ post_async(Server, Url, Body) ->
     Priority    :: priority().
 
 post_async(Server, Url, Body, Priority) ->
-    post_async(Server, Url, Priority, [], Body, 'undefined').
+    post_async(Server, Url, Priority, [], Body, maps:new()).
 
 
 % @doc full-featured POST API.
 % ask woodpecker to POST async data to the Url
--spec post_async(Server, Url, Priority, Headers, Body, Tags) -> 'ok' when
+-spec post_async(Server, Url, Priority, Headers, Body, Options) -> 'ok' when
     Server      :: server(),
     Url         :: url(),
     Headers     :: headers(),
     Priority    :: priority(),
     Body        :: body(),
-    Tags        :: tags().
+    Options     :: request_opt().
 
-post_async(Server, Url, Priority, Headers, Body, Tags) ->
-    gen_server:cast(Server, {create_task, <<"POST">>, Priority, Url, Headers, Body, Tags}).
+post_async(Server, Url, Priority, Headers, Body, Options) ->
+    gen_server:cast(Server, {create_task, <<"POST">>, Priority, Url, Headers, Body, Options}).
 
 
 % -------------------------------- GET API -------------------------------
@@ -924,7 +925,7 @@ post_async(Server, Url, Priority, Headers, Body, Tags) ->
     Url     :: url().
 
 get_async(Server, Url) ->
-    get_async(Server, Url, 'normal', [], 'undefined').
+    get_async(Server, Url, 'normal', [], maps:new()).
 
 % @doc ask woodpecker to async GET data from Url with empty headers
 -spec get_async(Server, Url, Priority) -> 'ok' when
@@ -933,16 +934,16 @@ get_async(Server, Url) ->
     Priority    :: priority().
 
 get_async(Server, Url, Priority) ->
-    get_async(Server, Url, Priority, [], 'undefined').
+    get_async(Server, Url, Priority, [], maps:new()).
 
 % @doc full-featured GET API.
 % ask woodpecker to async GET data from Url (body must be always empty for GET requsts)
--spec get_async(Server, Url, Priority, Headers, Tags) -> 'ok' when
+-spec get_async(Server, Url, Priority, Headers, Options) -> 'ok' when
     Server      :: server(),
     Url         :: url(),
     Headers     :: headers(),
     Priority    :: priority(),
-    Tags        :: tags().
+    Options     :: request_opt().
 
-get_async(Server, Url, Priority, Headers, Tags) ->
-    gen_server:cast(Server, {create_task, <<"GET">>, Priority, Url, Headers, 'undefined', Tags}).
+get_async(Server, Url, Priority, Headers, Options) ->
+    gen_server:cast(Server, {create_task, <<"GET">>, Priority, Url, Headers, 'undefined', Options}).
