@@ -96,8 +96,8 @@
 -type down()            :: {'DOWN', mon_ref(), 'process', stream_ref(), term()}.
 
 -type request_opt()     :: #{
-    tags                        => 'undefined' | tags(),
-    nodupes_req_group_id        => 'undefined' | term()
+    tags                 => 'undefined' | tags(),
+    nodupes_group        => 'undefined' | term()
 }.
 
 -record(wp_api_tasks, {
