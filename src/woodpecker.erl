@@ -352,8 +352,8 @@ handle_info(Msg, State) ->
 
 % @doc call back for terminate (we going to cancel timer here)
 -spec terminate(Reason, State) -> term() when
-    Reason :: 'normal' | 'shutdown' | {'shutdown',term()} | term(),
-    State :: term().
+    Reason      :: 'normal' | 'shutdown' | {'shutdown',term()} | term(),
+    State       :: term().
 
 terminate(_Reason, State) ->
 %    _ = flush_gun(State, 'undefined'),
@@ -361,12 +361,12 @@ terminate(_Reason, State) ->
 
 % @doc call back for code_change
 -spec code_change(OldVsn, State, Extra) -> Result when
-    OldVsn :: Vsn | {down, Vsn},
-    Vsn :: term(),
-    State :: term(),
-    Extra :: term(),
-    Result :: {ok, NewState},
-    NewState :: term().
+    OldVsn      :: Vsn | {down, Vsn},
+    Vsn         :: term(),
+    State       :: term(),
+    Extra       :: term(),
+    Result      :: {ok, NewState},
+    NewState    :: term().
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
@@ -388,19 +388,21 @@ code_change(_OldVsn, State, _Extra) ->
     State       :: woodpecker_state(),
     Result      :: woodpecker_state().
 
-create_task({Method, Priority, Url, Headers, Body, Tags}, State = #woodpecker_state{ets = Ets}) ->
+create_task({Method, Priority, Url, Headers, Body, Tags}, State = #woodpecker_state{ets = Ets, report_nofin_to = ReportNoFinTo, report_to = ReportTo}) ->
     TempRef = erlang:make_ref(),
     ets:insert(Ets,
         Task = #wp_api_tasks{
-            ref = {temp, TempRef},
-            status = 'new',
-            priority = Priority,
-            method = Method,
-            url = Url,
-            insert_date = get_time(),
-            headers = Headers,
-            body = Body,
-            tags = Tags
+            ref             = {temp, TempRef},
+            status          = 'new',
+            priority        = Priority,
+            method          = Method,
+            url             = Url,
+            insert_date     = get_time(),
+            headers         = Headers,
+            body            = Body,
+            tags            = Tags,
+            report_nofin_to = ReportNoFinTo,
+            report_to       = ReportTo
         }),
     Quota = get_quota(State),
     case Priority of
