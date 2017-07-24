@@ -55,6 +55,7 @@
         remote_port/0,
         start_opt/0,
         request_opt/0,
+        tags/0,
         priority/0,
         report/0,
         output/0
