@@ -44,10 +44,20 @@
         stop/2,
         get_async/2,
         get_async/3,
-        get_async/5,
+        get_async/4,
         post_async/3,
         post_async/4,
-        post_async/6
+        post_async/5
+    ]).
+
+-export_type([
+        remote_host/0,
+        remote_port/0,
+        start_opt/0,
+        request_opt/0,
+        priority/0,
+        report/0,
+        output/0
     ]).
 
 % ============================ gen_server part =================================
@@ -64,9 +74,9 @@ start_link(Host, Port) -> start_link(Host, Port, #{}).
 
 % @doc start api when State is #woodpecker_state
 -spec start_link(Host, Port, Options) -> Result when
-    Host        :: remote_host(),
-    Port        :: remote_port(),
-    Options     :: start_opt(),
+    Host        :: woodpecker:remote_host(),
+    Port        :: woodpecker:remote_port(),
+    Options     :: woodpecker:start_opt(),
     Result      :: {ok,Pid} | 'ignore' | {'error',Error},
     Pid         :: pid(),
     Error       :: {already_started,Pid} | term().
@@ -861,7 +871,7 @@ send_nofin_output(_State, #wp_api_tasks{report_nofin_to = {'message', ReportTo}}
 send_nofin_output(#woodpecker_state{server = Server}, #wp_api_tasks{
             report_nofin_to = {'erlroute', ReportTopic}
         } = Frame) ->
-    erlroute:pub(?MODULE, Server, ?LINE, ReportTopic, Frame, 'hybrid', '$erlroute_cmp_woodpecker').
+    erlroute:pub(?MODULE, Server, ?LINE, ReportTopic, convert_to_map(Frame), 'hybrid', '$erlroute_cmp_woodpecker').
 
 
 % @doc send output
@@ -871,12 +881,35 @@ send_nofin_output(#woodpecker_state{server = Server}, #wp_api_tasks{
 
 send_output(_State, #wp_api_tasks{report_nofin_to = 'undefined'}) -> ok;
 send_output(_State, #wp_api_tasks{report_to = {'message', ReportTo}} = Frame) ->
-    ReportTo ! Frame;
+    ReportTo ! convert_to_map(Frame);
 send_output(#woodpecker_state{server = Server}, #wp_api_tasks{
             report_to = {'erlroute', ReportTopic}
         } = Frame) ->
-    erlroute:pub(?MODULE, Server, ?LINE, ReportTopic, Frame, 'hybrid', '$erlroute_cmp_woodpecker').
+    erlroute:pub(?MODULE, Server, ?LINE, ReportTopic, convert_to_map(Frame), 'hybrid', '$erlroute_cmp_woodpecker').
 
+% @doc convert output to map
+-spec convert_to_map(Frame) -> Result when
+    Frame   :: wp_api_tasks(),
+    Result  :: woodpecker:output().
+
+convert_to_map(#wp_api_tasks{
+            method = Method,
+            url = Url,
+            headers = Headers,
+            body = Body,
+            response_headers = RespHeaders,
+            data = RespData,
+            tags = Tags
+        }) ->
+    #{
+        req_method      => Method,
+        req_url         => Url,
+        req_headers     => Headers,
+        req_body        => Body,
+        resp_headers    => RespHeaders,
+        resp_body       => RespData,
+        tags            => Tags
+    }.
 
 %---------------------- public api others functions ----------------------
 
@@ -890,31 +923,39 @@ send_output(#woodpecker_state{server = Server}, #wp_api_tasks{
     Body    :: body().
 
 post_async(Server, Url, Body) ->
-    post_async(Server, Url, 'normal', [], Body, maps:new()).
+    post_async(Server, Url, Body, [], maps:new()).
 
 % @doc ask woodpecker to POST data async to the Url with empty headers
--spec post_async(Server, Url, Body, Priority) -> 'ok' when
+-spec post_async(Server, Url, Body, Headers) -> 'ok' when
     Server      :: server(),
     Url         :: url(),
     Body        :: body(),
-    Priority    :: priority().
+    Headers     :: headers().
 
-post_async(Server, Url, Body, Priority) ->
-    post_async(Server, Url, Priority, [], Body, maps:new()).
+post_async(Server, Url, Body, Headers) ->
+    post_async(Server, Url, Body, Headers, maps:new()).
 
 
 % @doc full-featured POST API.
 % ask woodpecker to POST async data to the Url
--spec post_async(Server, Url, Priority, Headers, Body, Options) -> 'ok' when
+-spec post_async(Server, Url, Body, Headers, Options) -> 'ok' when
     Server      :: server(),
     Url         :: url(),
-    Headers     :: headers(),
-    Priority    :: priority(),
     Body        :: body(),
+    Headers     :: headers(),
     Options     :: request_opt().
 
-post_async(Server, Url, Priority, Headers, Body, Options) ->
-    gen_server:cast(Server, {create_task, <<"POST">>, Priority, Url, Headers, Body, Options}).
+post_async(Server, Url, Body, Headers, Options) ->
+    gen_server:cast(Server,
+        {create_task,
+            <<"POST">>,
+            maps:get('priority', Options, 'normal'),
+            Url,
+            Headers,
+            Body,
+            maps:without(['priority'], Options)
+        }
+    ).
 
 
 % -------------------------------- GET API -------------------------------
@@ -925,25 +966,33 @@ post_async(Server, Url, Priority, Headers, Body, Options) ->
     Url     :: url().
 
 get_async(Server, Url) ->
-    get_async(Server, Url, 'normal', [], maps:new()).
+    get_async(Server, Url, [], maps:new()).
 
 % @doc ask woodpecker to async GET data from Url with empty headers
--spec get_async(Server, Url, Priority) -> 'ok' when
+-spec get_async(Server, Url, Headers) -> 'ok' when
     Server      :: server(),
     Url         :: url(),
-    Priority    :: priority().
+    Headers     :: headers().
 
-get_async(Server, Url, Priority) ->
-    get_async(Server, Url, Priority, [], maps:new()).
+get_async(Server, Url, Headers) ->
+    get_async(Server, Url, Headers, maps:new()).
 
 % @doc full-featured GET API.
 % ask woodpecker to async GET data from Url (body must be always empty for GET requsts)
--spec get_async(Server, Url, Priority, Headers, Options) -> 'ok' when
+-spec get_async(Server, Url, Headers, Options) -> 'ok' when
     Server      :: server(),
     Url         :: url(),
     Headers     :: headers(),
-    Priority    :: priority(),
     Options     :: request_opt().
 
-get_async(Server, Url, Priority, Headers, Options) ->
-    gen_server:cast(Server, {create_task, <<"GET">>, Priority, Url, Headers, 'undefined', Options}).
+get_async(Server, Url, Headers, Options) ->
+    gen_server:cast(Server,
+        {create_task,
+            <<"GET">>,
+            maps:get('priority', Options, 'normal'),
+            Url,
+            Headers,
+            'undefined',
+            maps:without(['priority'], Options)
+        }
+    ).

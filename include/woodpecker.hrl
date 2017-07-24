@@ -33,6 +33,22 @@
             => true | boolean()
     }.
 
+-type request_opt() :: #{
+    'priority'          => priority(),
+    'tags'              => 'undefined' | tags(),
+    'nodupes_group'     => 'undefined' | term()
+}.
+
+-type output()      :: #{
+    'req_method'        => method(),
+    'req_url'           => url(),
+    'req_headers'       => headers(),
+    'req_body'          => body(),
+    'resp_headers'      => headers(),
+    'resp_body'         => body(),
+    'tags'              => tags()
+}.
+
 % TODO: report via spawning process.
 -type report()          :: {'erlroute', binary()}
                          | {'message', pid() | atom()}.
@@ -94,11 +110,6 @@
 -type gun_push()        :: {'gun_push', gun_pid(), stream_ref(), stream_ref(), method(), nonempty_list(), nonempty_list(), headers()}.
 -type gun_error()       :: {'gun_error', gun_pid(), stream_ref(), term()} | {'gun_error', gun_pid(), term()}.
 -type down()            :: {'DOWN', mon_ref(), 'process', stream_ref(), term()}.
-
--type request_opt()     :: #{
-    tags                 => 'undefined' | tags(),
-    nodupes_group        => 'undefined' | term()
-}.
 
 -record(wp_api_tasks, {
         ref                     :: reference() | {'temp',reference()} | mspec(),
