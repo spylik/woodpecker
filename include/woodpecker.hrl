@@ -99,7 +99,7 @@
 -type isFin()       :: 'fin' | 'nofin'.
 -type stage()       :: 'order_stage' | 'cast_stage'.
 -type newtaskmsg()  :: {'create_task', method(), priority(), url(), headers(), iodata()}.
--type headers()     :: [] | [{binary(), iodata()}].
+-type headers()     :: [] | cow_http:headers().
 -type httpstatus()  :: 100..999.
 -type stream_ref()  :: reference().
 -type gun_pid()     :: pid().
