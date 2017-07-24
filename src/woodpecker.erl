@@ -190,7 +190,7 @@ handle_call(Msg, _From, State) ->
     Result  :: {noreply, State} | {stop, normal, State}.
 
 % @doc gen_server callback for create_task message (when we do not allow dupes by req_group_id)
-handle_cast({'create_task', Method, Priority, Url, Headers, Body, #{'nodupes_group' := NodupesGroupId}, Options}, State = #woodpecker_state{ets = Ets}) ->
+handle_cast({'create_task', Method, Priority, Url, Headers, Body, #{'nodupes_group' := NodupesGroupId} = Options}, State = #woodpecker_state{ets = Ets}) ->
     MS = [{
             #wp_api_tasks{status = '$1', nodupes_group = NodupesGroupId, _ = '_'},
                 [
@@ -201,7 +201,8 @@ handle_cast({'create_task', Method, Priority, Url, Headers, Body, #{'nodupes_gro
         ],
     NewState = case ets:select_count(Ets, MS) > 0 of
         false -> create_task({Method, Priority, Url, Headers, Body, Options}, State);
-        true -> State
+        true ->
+            State
     end,
     {noreply, NewState};
 
@@ -868,7 +869,7 @@ get_time() ->
 
 send_nofin_output(_State, #wp_api_tasks{report_nofin_to = 'undefined'}) -> ok;
 send_nofin_output(_State, #wp_api_tasks{report_nofin_to = {'message', ReportTo}} = Frame) ->
-    ReportTo ! Frame;
+    ReportTo ! convert_to_map(Frame);
 send_nofin_output(#woodpecker_state{server = Server}, #wp_api_tasks{
             report_nofin_to = {'erlroute', ReportTopic}
         } = Frame) ->
@@ -880,7 +881,7 @@ send_nofin_output(#woodpecker_state{server = Server}, #wp_api_tasks{
     State   :: woodpecker_state(),
     Frame   :: wp_api_tasks().
 
-send_output(_State, #wp_api_tasks{report_nofin_to = 'undefined'}) -> ok;
+send_output(_State, #wp_api_tasks{report_to = 'undefined'}) -> ok;
 send_output(_State, #wp_api_tasks{report_to = {'message', ReportTo}} = Frame) ->
     ReportTo ! convert_to_map(Frame);
 send_output(#woodpecker_state{server = Server}, #wp_api_tasks{
