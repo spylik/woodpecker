@@ -58,7 +58,8 @@
         tags/0,
         priority/0,
         report/0,
-        output/0
+        output/0,
+        headers/0
     ]).
 
 % ============================ gen_server part =================================
@@ -272,9 +273,10 @@ handle_info('heartbeat', State = #woodpecker_state{
     };
 
 %% gun_response, nofin state
-handle_info({'gun_response',_ConnPid,ReqRef,'nofin',200,Headers}, State) ->
+handle_info({'gun_response',_ConnPid,ReqRef,'nofin',HttpStatus,Headers}, State) ->
     ets:update_element(
         State#woodpecker_state.ets, ReqRef, [
+            {#wp_api_tasks.http_status, HttpStatus},
             {#wp_api_tasks.status, 'got_gun_response'},
             {#wp_api_tasks.last_response_date, get_time()},
             {#wp_api_tasks.response_headers, Headers}
