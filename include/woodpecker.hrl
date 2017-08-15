@@ -44,6 +44,7 @@
     'req_url'           => url(),
     'req_headers'       => headers(),
     'req_body'          => body(),
+    'resp_status'       => httpstatus(),
     'resp_headers'      => headers(),
     'resp_body'         => body(),
     'tags'              => tags()
@@ -129,6 +130,7 @@
         request_date            :: 'undefined' | pos_integer() | mspec(),
         last_response_date      :: 'undefined' | pos_integer() | mspec(),
         response_headers        :: 'undefined' | headers() | mspec(),
+        http_status             :: httpstatus(),
         data                    :: 'undefined' | binary() | mspec()
     }).
 -type wp_api_tasks() :: #wp_api_tasks{}.
