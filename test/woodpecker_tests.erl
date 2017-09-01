@@ -1,5 +1,5 @@
 % ATTENTION: do not run this tests on production nodes
-% we using mlibs:random_atom for creating random names for servers, 
+% we using mlibs:random_atom for creating random names for servers,
 % but atoms will not garbage collected
 
 -module(woodpecker_tests).
@@ -12,10 +12,17 @@
 
 -define(TESTMODULE, woodpecker).
 -define(TESTSERVER, test_wp_server).
+-define(REGISTERAS, {'local', ?TESTSERVER}).
 -define(TESTHOST, "127.0.0.1").
 -define(TESTPORT, 8082).
 -define(SpawnWaitLoop, 200).
 -define(RecieveLoop, 250).
+-define(RanchOpts,
+        [
+            {connection_type, 'worker'},
+            {num_acceptors, 10}
+        ]
+    ).
 
 % --------------------------------- fixtures ----------------------------------
 
@@ -25,9 +32,9 @@ otp_test_() ->
         fun() -> error_logger:tty(false) end,
         {inorder,
             [
-                {<<"gen_server able to start via ?TESTSERVER:start_link(#woodpecker_state{})">>,
+                {<<"gen_server able to start via ?TESTSERVER:start_link(?TESTHOST, ?TESTPORT)">>,
                     fun() ->
-                        ?TESTMODULE:start_link(#woodpecker_state{server = ?TESTSERVER, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT}),
+                        ?TESTMODULE:start_link(?TESTHOST, ?TESTPORT, #{register => ?REGISTERAS}),
                         ?assertEqual(
                             true,
                             is_pid(whereis(?TESTSERVER))
@@ -43,7 +50,7 @@ otp_test_() ->
                 end},
                 {<<"gen_server able to start and stop via ?TESTSERVER:start_link() / ?TESTSERVER:stop(sync)">>,
                     fun() ->
-                        ?TESTMODULE:start_link(#woodpecker_state{server = ?TESTSERVER, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT}),
+                        ?TESTMODULE:start_link(?TESTHOST, ?TESTPORT, #{register => ?REGISTERAS}),
                         ?assertEqual(ok, ?TESTMODULE:stop('sync',?TESTSERVER)),
                         ?assertEqual(
                             false,
@@ -52,7 +59,7 @@ otp_test_() ->
                 end},
                 {<<"gen_server able to start and stop via ?TESTSERVER:start_link() / ?TESTSERVER:stop()">>,
                     fun() ->
-                        ?TESTMODULE:start_link(#woodpecker_state{server = ?TESTSERVER, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT}),
+                        ?TESTMODULE:start_link(?TESTHOST, ?TESTPORT, #{register => ?REGISTERAS}),
                         ?assertEqual(ok, ?TESTMODULE:stop(?TESTSERVER)),
                         ?assertEqual(
                             false,
@@ -61,7 +68,7 @@ otp_test_() ->
                 end},
                 {<<"gen_server able to start and stop via ?TESTSERVER:start_link() ?TESTSERVER:stop(async)">>,
                     fun() ->
-                        ?TESTMODULE:start_link(#woodpecker_state{server = ?TESTSERVER, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT}),
+                        ?TESTMODULE:start_link(?TESTHOST, ?TESTPORT, #{register => ?REGISTERAS}),
                         ?TESTMODULE:stop('async',?TESTSERVER),
                         timer:sleep(1), % for async cast
                         ?assertEqual(
@@ -79,14 +86,14 @@ tests_with_gun_and_cowboy_test_() ->
         % setup
         fun() ->
             ToStop = tutils:setup_start([{'apps',[ranch,cowboy,crypto,asn1,public_key,ssl,cowlib,gun]}]),
-            CowboyRanchRef = start_cowboy(10),
+            CowboyRanchRef = start_cowboy(?RanchOpts),
             [{'tostop', ToStop}, {'ranch_ref', CowboyRanchRef}]
         end,
         % cleanup
         fun([{'tostop', ToStop},{'ranch_ref', CowboyRanchRef}]) ->
             cowboy:stop_listener(CowboyRanchRef),
             tutils:cleanup_stop(ToStop)
-        end, 
+        end,
         {inparallel,
             [
                 {<<"able to send single GET request with urgent priority in single connection">>,
@@ -129,7 +136,16 @@ tests_with_gun_and_cowboy_test_() ->
                         Server = mlibs:random_atom(),
                         Max_paralell_requests_per_conn = 2,
                         ETSTable = woodpecker:generate_ets_name(Server),
-                        ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, max_paralell_requests_per_conn = Max_paralell_requests_per_conn}),
+                        ?TESTMODULE:start_link(
+                            ?TESTHOST,
+                            ?TESTPORT,
+                            #{
+                                register                        => ?REGISTERAS,
+                                report_to                       => {'message', WaitAt},
+                                heartbeat_freq                  => 10000,
+                                max_paralell_requests_per_conn  => Max_paralell_requests_per_conn
+                            }
+                        ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'urgent') || _A <- lists:seq(1,15)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
@@ -156,13 +172,22 @@ tests_with_gun_and_cowboy_test_() ->
                         Server = mlibs:random_atom(),
                         Max_paralell_requests_per_conn = 2,
                         ETSTable = woodpecker:generate_ets_name(Server),
-                        ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, max_paralell_requests_per_conn = Max_paralell_requests_per_conn}),
+                        ?TESTMODULE:start_link(
+                            ?TESTHOST,
+                            ?TESTPORT,
+                            #{
+                                register                        => ?REGISTERAS,
+                                report_to                       => {'message', WaitAt},
+                                heartbeat_freq                  => 10000,
+                                max_paralell_requests_per_conn  => Max_paralell_requests_per_conn
+                            }
+                        ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'high') || _A <- lists:seq(1,15)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(15, length(Tasks)),
                         Tst = ets:select(ETSTable,[{#wp_api_tasks{priority = high,max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
- 
+
                         ?assertEqual(15, length(Tst)),
                         Server ! 'heartbeat',
                         [Acc] = tutils:recieve_loop([], ?RecieveLoop, WaitAt),
@@ -184,7 +209,16 @@ tests_with_gun_and_cowboy_test_() ->
                         Server = mlibs:random_atom(),
                         Max_paralell_requests_per_conn = 2,
                         ETSTable = woodpecker:generate_ets_name(Server),
-                        ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, max_paralell_requests_per_conn = Max_paralell_requests_per_conn}),
+                        ?TESTMODULE:start_link(
+                            ?TESTHOST,
+                            ?TESTPORT,
+                            #{
+                                register                        => ?REGISTERAS,
+                                report_to                       => {'message', WaitAt},
+                                heartbeat_freq                  => 10000,
+                                max_paralell_requests_per_conn  => Max_paralell_requests_per_conn
+                            }
+                        ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'normal') || _A <- lists:seq(1,20)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
@@ -211,7 +245,16 @@ tests_with_gun_and_cowboy_test_() ->
                         Server = mlibs:random_atom(),
                         Max_paralell_requests_per_conn = 2,
                         ETSTable = woodpecker:generate_ets_name(Server),
-                        ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, max_paralell_requests_per_conn = Max_paralell_requests_per_conn}),
+                        ?TESTMODULE:start_link(
+                            ?TESTHOST,
+                            ?TESTPORT,
+                            #{
+                                register                        => ?REGISTERAS,
+                                report_to                       => {'message', WaitAt},
+                                heartbeat_freq                  => 10000,
+                                max_paralell_requests_per_conn  => Max_paralell_requests_per_conn
+                            }
+                        ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'low') || _A <- lists:seq(1,20)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
@@ -240,7 +283,17 @@ tests_with_gun_and_cowboy_test_() ->
                         Requests_allowed_in_period = 10000,
                         SendReq = 10,
                         ETSTable = woodpecker:generate_ets_name(Server),
-                        ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, requests_allowed_in_period = Requests_allowed_in_period, requests_allowed_by_api = Requests_allowed_by_api}),
+                        ?TESTMODULE:start_link(
+                            ?TESTHOST,
+                            ?TESTPORT,
+                            #{
+                                register                        => ?REGISTERAS,
+                                report_to                       => {'message', WaitAt},
+                                heartbeat_freq                  => 10000,
+                                requests_allowed_in_period      => Requests_allowed_in_period,
+                                requests_allowed_by_api         => Requests_allowed_by_api
+                            }
+                        ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'urgent') || _A <- lists:seq(1,SendReq)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
@@ -268,7 +321,17 @@ tests_with_gun_and_cowboy_test_() ->
                         Requests_allowed_in_period = 10000,
                         SendReq = 10,
                         ETSTable = woodpecker:generate_ets_name(Server),
-                        ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, requests_allowed_in_period = Requests_allowed_in_period, requests_allowed_by_api = Requests_allowed_by_api}),
+                        ?TESTMODULE:start_link(
+                            ?TESTHOST,
+                            ?TESTPORT,
+                            #{
+                                register                        => ?REGISTERAS,
+                                report_to                       => {'message', WaitAt},
+                                heartbeat_freq                  => 10000,
+                                requests_allowed_in_period      => Requests_allowed_in_period,
+                                requests_allowed_by_api         => Requests_allowed_by_api
+                            }
+                        ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'high') || _A <- lists:seq(1,SendReq)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
@@ -297,7 +360,17 @@ tests_with_gun_and_cowboy_test_() ->
                         Requests_allowed_in_period = 1000,
                         SendReq = 10,
                         ETSTable = woodpecker:generate_ets_name(Server),
-                        ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, requests_allowed_in_period = Requests_allowed_in_period, requests_allowed_by_api = Requests_allowed_by_api}),
+                        ?TESTMODULE:start_link(
+                            ?TESTHOST,
+                            ?TESTPORT,
+                            #{
+                                register                        => ?REGISTERAS,
+                                report_to                       => {'message', WaitAt},
+                                heartbeat_freq                  => 10000,
+                                requests_allowed_in_period      => Requests_allowed_in_period,
+                                requests_allowed_by_api         => Requests_allowed_by_api
+                            }
+                        ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'urgent') || _A <- lists:seq(1,SendReq)],
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'high') || _A <- lists:seq(1,SendReq)],
                         timer:sleep(20),
@@ -307,7 +380,7 @@ tests_with_gun_and_cowboy_test_() ->
                         ?assertEqual(SendReq, length(Tst1)),
                         Tst2 = ets:select(ETSTable,[{#wp_api_tasks{status = 'new', priority = 'high',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
                         Tst3 = ets:select(ETSTable,[{#wp_api_tasks{priority = 'high',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
- 
+
                         Server ! 'heartbeat',
                         ?assertEqual(SendReq, length(Tst2)+1),
                         ?assertEqual(SendReq, length(Tst3)),
@@ -333,7 +406,17 @@ tests_with_gun_and_cowboy_test_() ->
                         Requests_allowed_in_period = 10000,
                         SendReq = 10,
                         ETSTable = woodpecker:generate_ets_name(Server),
-                        ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, requests_allowed_in_period = Requests_allowed_in_period, requests_allowed_by_api = Requests_allowed_by_api}),
+                        ?TESTMODULE:start_link(
+                            ?TESTHOST,
+                            ?TESTPORT,
+                            #{
+                                register                        => ?REGISTERAS,
+                                report_to                       => {'message', WaitAt},
+                                heartbeat_freq                  => 10000,
+                                requests_allowed_in_period      => Requests_allowed_in_period,
+                                requests_allowed_by_api         => Requests_allowed_by_api
+                            }
+                        ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'normal') || _A <- lists:seq(1,SendReq)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
@@ -346,7 +429,7 @@ tests_with_gun_and_cowboy_test_() ->
                         ?assertEqual(Requests_allowed_by_api, length(Tst2)),
                         Tst3 = ets:select(ETSTable,[{#wp_api_tasks{status = 'new', priority = 'normal',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
                         ?assertEqual(SendReq, length(Tst3)+Requests_allowed_by_api),
- 
+
                         [Acc] = tutils:recieve_loop([], ?RecieveLoop, WaitAt),
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Requests_allowed_by_api, length(Acc)),
@@ -368,7 +451,17 @@ tests_with_gun_and_cowboy_test_() ->
                         Requests_allowed_in_period = 10000,
                         SendReq = 10,
                         ETSTable = woodpecker:generate_ets_name(Server),
-                        ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, requests_allowed_in_period = Requests_allowed_in_period, requests_allowed_by_api = Requests_allowed_by_api}),
+                        ?TESTMODULE:start_link(
+                            ?TESTHOST,
+                            ?TESTPORT,
+                            #{
+                                register                        => ?REGISTERAS,
+                                report_to                       => {'message', WaitAt},
+                                heartbeat_freq                  => 10000,
+                                requests_allowed_in_period      => Requests_allowed_in_period,
+                                requests_allowed_by_api         => Requests_allowed_by_api
+                            }
+                        ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'low') || _A <- lists:seq(1,SendReq)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
@@ -379,7 +472,7 @@ tests_with_gun_and_cowboy_test_() ->
                         timer:sleep(50),
                         Tst2 = ets:select(ETSTable,[{#wp_api_tasks{status = 'new', priority = 'low',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
                         ?assertEqual(SendReq, length(Tst2)+Requests_allowed_by_api),
- 
+
                         [Acc] = tutils:recieve_loop([], ?RecieveLoop, WaitAt),
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Requests_allowed_by_api, length(Acc)),
@@ -405,14 +498,14 @@ tests_with_gun_and_slowcowboy_test_() ->
         % setup
         fun() ->
             ToStop = tutils:setup_start([{'apps',[ranch,cowboy,crypto,asn1,public_key,ssl,cowlib,gun]}]),
-            CowboyRanchRef = start_cowboy(10),
+            CowboyRanchRef = start_cowboy(?RanchOpts),
             [{'tostop', ToStop}, {'ranch_ref', CowboyRanchRef}]
         end,
         % cleanup
         fun([{'tostop', ToStop},{'ranch_ref', CowboyRanchRef}]) ->
             cowboy:stop_listener(CowboyRanchRef),
             tutils:cleanup_stop(ToStop)
-        end, 
+        end,
         {inparallel,
             [
                 {<<"Must respect max_paralell_requests_per_conn for normal priority requests (with multiple hearbeat)">>,
@@ -424,7 +517,16 @@ tests_with_gun_and_slowcowboy_test_() ->
                         Max_paralell_requests_per_conn = 2,
                         TimerForCowboy = 20,
                         ETSTable = woodpecker:generate_ets_name(Server),
-                        ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10000, max_paralell_requests_per_conn = Max_paralell_requests_per_conn}),
+                        ?TESTMODULE:start_link(
+                            ?TESTHOST,
+                            ?TESTPORT,
+                            #{
+                                register                        => ?REGISTERAS,
+                                report_to                       => {'message', WaitAt},
+                                heartbeat_freq                  => 10000,
+                                max_paralell_requests_per_conn  => Max_paralell_requests_per_conn
+                            }
+                        ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam),"&wait=",integer_to_list(TimerForCowboy)]),'normal') || _A <- lists:seq(1,20)],
                         timer:sleep(10),
                         Tasks = ets:tab2list(ETSTable),
@@ -455,7 +557,16 @@ simple(get, Priority, NumberOfRequests) ->
     MQParam = integer_to_binary(QueryParam),
     WaitAt = tutils:spawn_wait_loop_max(3,100),
     Server = mlibs:random_atom(),
-    ?TESTMODULE:start_link(#woodpecker_state{server = Server, connect_to = ?TESTHOST, connect_to_port = ?TESTPORT, report_to = WaitAt, heartbeat_freq = 10}),
+    ?TESTMODULE:start_link(
+        ?TESTHOST,
+        ?TESTPORT,
+        #{
+            register                        => ?REGISTERAS,
+            report_to                       => {'message', WaitAt},
+            heartbeat_freq                  => 10
+        }
+    ),
+
     [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),Priority) || _A <- lists:seq(1,NumberOfRequests)],
     [Acc] = tutils:recieve_loop([], 220, WaitAt),
     ?assertEqual(NumberOfRequests, length(Acc)),
@@ -469,16 +580,20 @@ simple(get, Priority, NumberOfRequests) ->
     ?TESTMODULE:stop(Server).
 
 
-start_cowboy(Acceptors) ->
+start_cowboy(RanchOpts) ->
     Dispatch = cowboy_router:compile([
             {'_', [
                 {"/", ?MODULE, []}
             ]}
         ]
     ),
-    {ok, CowboyPid} = cowboy:start_clear(http, Acceptors, [{port, ?TESTPORT}], #{
-        env => #{dispatch => Dispatch}
-    }), CowboyPid.
+    {ok, CowboyPid} = cowboy:start_clear(
+        'http',
+        RanchOpts,
+        #{
+            'env' => #{dispatch => Dispatch}
+        }
+    ), CowboyPid.
 
 init(Req0, Opts) ->
     Method = cowboy_req:method(Req0),
