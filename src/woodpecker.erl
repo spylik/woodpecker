@@ -117,12 +117,6 @@ stop('async', Server) ->
     NState      :: woodpecker_state().
 
 init({Host, Port, Options}) ->
-%{State = #woodpecker_state{
-%        server = Server,
-%        heartbeat_freq = Heartbeat_freq,
-%        max_paralell_requests_per_conn = Max_paralell_requests_per_conn,
-%        requests_allowed_by_api = Requests_allowed_by_api
-%    }, _Parent}) ->
     Ets = generate_ets_name(Host, maps:get('register', Options, 'undefined')),
     _ = ets:new(Ets, [ordered_set, protected, {keypos, #wp_api_tasks.ref}, named_table]),
 
