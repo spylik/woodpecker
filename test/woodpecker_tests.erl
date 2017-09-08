@@ -29,7 +29,7 @@
 % --------------------------------- fixtures ----------------------------------
 
 % tests for cover standart otp behaviour
-otp_tes() ->
+otp_test_() ->
     {setup,
         fun() -> error_logger:tty(false) end,
         {inorder,
@@ -137,7 +137,7 @@ tests_with_gun_and_cowboy_test_() ->
                         WaitAt = tutils:spawn_wait_loop_max(25,?SpawnWaitLoop),
                         Server = mlibs:random_atom(),
                         Max_paralell_requests_per_conn = 2,
-                        ETSTable = woodpecker:generate_ets_name(?REGISTERAS(Server)),
+                        ETSTable = woodpecker:generate_ets_name(?TESTHOST, ?REGISTERAS(Server)),
                         ?TESTMODULE:start_link(
                             ?TESTHOST,
                             ?TESTPORT,
@@ -148,7 +148,7 @@ tests_with_gun_and_cowboy_test_() ->
                                 max_paralell_requests_per_conn  => Max_paralell_requests_per_conn
                             }
                         ),
-                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'urgent') || _A <- lists:seq(1,15)],
+                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),[], #{priority => 'urgent'}) || _A <- lists:seq(1,15)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(15, length(Tasks)),
@@ -158,7 +158,7 @@ tests_with_gun_and_cowboy_test_() ->
                         [Acc] = tutils:recieve_loop([], ?RecieveLoop, WaitAt),
                         ?assertEqual(15, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        FirstPid = maps:get(pid, binary_to_term(maps:get(resp_body, FF))),
                         lists:map(fun(#{resp_body := DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
@@ -173,7 +173,7 @@ tests_with_gun_and_cowboy_test_() ->
                         WaitAt = tutils:spawn_wait_loop_max(25,?SpawnWaitLoop),
                         Server = mlibs:random_atom(),
                         Max_paralell_requests_per_conn = 2,
-                        ETSTable = woodpecker:generate_ets_name(?REGISTERAS(Server)),
+                        ETSTable = woodpecker:generate_ets_name(?TESTHOST, ?REGISTERAS(Server)),
                         ?TESTMODULE:start_link(
                             ?TESTHOST,
                             ?TESTPORT,
@@ -184,7 +184,7 @@ tests_with_gun_and_cowboy_test_() ->
                                 max_paralell_requests_per_conn  => Max_paralell_requests_per_conn
                             }
                         ),
-                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'high') || _A <- lists:seq(1,15)],
+                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => 'high'}) || _A <- lists:seq(1,15)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(15, length(Tasks)),
@@ -195,7 +195,7 @@ tests_with_gun_and_cowboy_test_() ->
                         [Acc] = tutils:recieve_loop([], ?RecieveLoop, WaitAt),
                         ?assertEqual(15, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        FirstPid = maps:get(pid, binary_to_term(maps:get(resp_body, FF))),
                         lists:map(fun(#{resp_body := DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
@@ -210,7 +210,7 @@ tests_with_gun_and_cowboy_test_() ->
                         WaitAt = tutils:spawn_wait_loop_max(10,?SpawnWaitLoop),
                         Server = mlibs:random_atom(),
                         Max_paralell_requests_per_conn = 2,
-                        ETSTable = woodpecker:generate_ets_name(?REGISTERAS(Server)),
+                        ETSTable = woodpecker:generate_ets_name(?TESTHOST, ?REGISTERAS(Server)),
                         ?TESTMODULE:start_link(
                             ?TESTHOST,
                             ?TESTPORT,
@@ -221,7 +221,7 @@ tests_with_gun_and_cowboy_test_() ->
                                 max_paralell_requests_per_conn  => Max_paralell_requests_per_conn
                             }
                         ),
-                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'normal') || _A <- lists:seq(1,20)],
+                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => 'normal'}) || _A <- lists:seq(1,20)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(20, length(Tasks)),
@@ -232,7 +232,7 @@ tests_with_gun_and_cowboy_test_() ->
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Max_paralell_requests_per_conn, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        FirstPid = maps:get(pid, binary_to_term(maps:get(resp_body, FF))),
                         lists:map(fun(#{resp_body := DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
@@ -246,7 +246,7 @@ tests_with_gun_and_cowboy_test_() ->
                         WaitAt = tutils:spawn_wait_loop_max(10,?SpawnWaitLoop),
                         Server = mlibs:random_atom(),
                         Max_paralell_requests_per_conn = 2,
-                        ETSTable = woodpecker:generate_ets_name(?REGISTERAS(Server)),
+                        ETSTable = woodpecker:generate_ets_name(?TESTHOST, ?REGISTERAS(Server)),
                         ?TESTMODULE:start_link(
                             ?TESTHOST,
                             ?TESTPORT,
@@ -257,7 +257,7 @@ tests_with_gun_and_cowboy_test_() ->
                                 max_paralell_requests_per_conn  => Max_paralell_requests_per_conn
                             }
                         ),
-                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'low') || _A <- lists:seq(1,20)],
+                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => 'low'}) || _A <- lists:seq(1,20)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(20, length(Tasks)),
@@ -268,7 +268,7 @@ tests_with_gun_and_cowboy_test_() ->
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Max_paralell_requests_per_conn, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        FirstPid = maps:get(pid, binary_to_term(maps:get(resp_body, FF))),
                         lists:map(fun(#{resp_body := DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
@@ -284,7 +284,7 @@ tests_with_gun_and_cowboy_test_() ->
                         Requests_allowed_by_api = 1,
                         Requests_allowed_in_period = 10000,
                         SendReq = 10,
-                        ETSTable = woodpecker:generate_ets_name(?REGISTERAS(Server)),
+                        ETSTable = woodpecker:generate_ets_name(?TESTHOST, ?REGISTERAS(Server)),
                         ?TESTMODULE:start_link(
                             ?TESTHOST,
                             ?TESTPORT,
@@ -296,7 +296,7 @@ tests_with_gun_and_cowboy_test_() ->
                                 requests_allowed_by_api         => Requests_allowed_by_api
                             }
                         ),
-                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'urgent') || _A <- lists:seq(1,SendReq)],
+                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => 'urgent'}) || _A <- lists:seq(1,SendReq)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(SendReq, length(Tasks)),
@@ -306,7 +306,7 @@ tests_with_gun_and_cowboy_test_() ->
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(SendReq, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        FirstPid = maps:get(pid, binary_to_term(maps:get(resp_body, FF))),
                         lists:map(fun(#{resp_body := DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
@@ -322,7 +322,7 @@ tests_with_gun_and_cowboy_test_() ->
                         Requests_allowed_by_api = 1,
                         Requests_allowed_in_period = 10000,
                         SendReq = 10,
-                        ETSTable = woodpecker:generate_ets_name(?REGISTERAS(Server)),
+                        ETSTable = woodpecker:generate_ets_name(?TESTHOST, ?REGISTERAS(Server)),
                         ?TESTMODULE:start_link(
                             ?TESTHOST,
                             ?TESTPORT,
@@ -334,7 +334,7 @@ tests_with_gun_and_cowboy_test_() ->
                                 requests_allowed_by_api         => Requests_allowed_by_api
                             }
                         ),
-                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'high') || _A <- lists:seq(1,SendReq)],
+                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => 'high'}) || _A <- lists:seq(1,SendReq)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(SendReq, length(Tasks)),
@@ -345,7 +345,7 @@ tests_with_gun_and_cowboy_test_() ->
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Requests_allowed_by_api, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        FirstPid = maps:get(pid, binary_to_term(maps:get(resp_body, FF))),
                         lists:map(fun(#{resp_body := DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
@@ -361,7 +361,7 @@ tests_with_gun_and_cowboy_test_() ->
                         Requests_allowed_by_api = 11,
                         Requests_allowed_in_period = 1000,
                         SendReq = 10,
-                        ETSTable = woodpecker:generate_ets_name(?REGISTERAS(Server)),
+                        ETSTable = woodpecker:generate_ets_name(?TESTHOST, ?REGISTERAS(Server)),
                         ?TESTMODULE:start_link(
                             ?TESTHOST,
                             ?TESTPORT,
@@ -373,8 +373,8 @@ tests_with_gun_and_cowboy_test_() ->
                                 requests_allowed_by_api         => Requests_allowed_by_api
                             }
                         ),
-                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'urgent') || _A <- lists:seq(1,SendReq)],
-                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'high') || _A <- lists:seq(1,SendReq)],
+                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => 'urgent'}) || _A <- lists:seq(1,SendReq)],
+                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => 'high'}) || _A <- lists:seq(1,SendReq)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(SendReq*2, length(Tasks)),
@@ -390,7 +390,7 @@ tests_with_gun_and_cowboy_test_() ->
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Requests_allowed_by_api, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        FirstPid = maps:get(pid, binary_to_term(maps:get(resp_body, FF))),
                         lists:map(fun(#{resp_body := DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
@@ -407,7 +407,7 @@ tests_with_gun_and_cowboy_test_() ->
                         Requests_allowed_by_api = 5,
                         Requests_allowed_in_period = 10000,
                         SendReq = 10,
-                        ETSTable = woodpecker:generate_ets_name(?REGISTERAS(Server)),
+                        ETSTable = woodpecker:generate_ets_name(?TESTHOST, ?REGISTERAS(Server)),
                         ?TESTMODULE:start_link(
                             ?TESTHOST,
                             ?TESTPORT,
@@ -419,7 +419,7 @@ tests_with_gun_and_cowboy_test_() ->
                                 requests_allowed_by_api         => Requests_allowed_by_api
                             }
                         ),
-                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'normal') || _A <- lists:seq(1,SendReq)],
+                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => 'normal'}) || _A <- lists:seq(1,SendReq)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(SendReq, length(Tasks)),
@@ -436,7 +436,7 @@ tests_with_gun_and_cowboy_test_() ->
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Requests_allowed_by_api, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        FirstPid = maps:get(pid, binary_to_term(maps:get(resp_body, FF))),
                         lists:map(fun(#{resp_body := DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
@@ -452,7 +452,7 @@ tests_with_gun_and_cowboy_test_() ->
                         Requests_allowed_by_api = 5,
                         Requests_allowed_in_period = 10000,
                         SendReq = 10,
-                        ETSTable = woodpecker:generate_ets_name(?REGISTERAS(Server)),
+                        ETSTable = woodpecker:generate_ets_name(?TESTHOST, ?REGISTERAS(Server)),
                         ?TESTMODULE:start_link(
                             ?TESTHOST,
                             ?TESTPORT,
@@ -464,7 +464,7 @@ tests_with_gun_and_cowboy_test_() ->
                                 requests_allowed_by_api         => Requests_allowed_by_api
                             }
                         ),
-                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),'low') || _A <- lists:seq(1,SendReq)],
+                        [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => 'low'}) || _A <- lists:seq(1,SendReq)],
                         timer:sleep(20),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(SendReq, length(Tasks)),
@@ -479,7 +479,7 @@ tests_with_gun_and_cowboy_test_() ->
                         ?TESTMODULE:stop(Server),
                         ?assertEqual(Requests_allowed_by_api, length(Acc)),
                         FF = hd(Acc),
-                        FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+                        FirstPid = maps:get(pid, binary_to_term(maps:get(resp_body, FF))),
                         lists:map(fun(#{resp_body := DataFrame}) ->
                             Data = binary_to_term(DataFrame),
                             ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
@@ -564,11 +564,11 @@ simple(get, Priority, NumberOfRequests) ->
         }
     ),
 
-    [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),Priority) || _A <- lists:seq(1,NumberOfRequests)],
+    [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => Priority}) || _A <- lists:seq(1,NumberOfRequests)],
     [Acc] = tutils:recieve_loop([], 220, WaitAt),
     ?assertEqual(NumberOfRequests, length(Acc)),
     FF = hd(Acc),
-    FirstPid = maps:get(pid, binary_to_term(FF#wp_api_tasks.data)),
+    FirstPid = maps:get(pid, binary_to_term(maps:get(resp_body, FF))),
     lists:map(fun(#{resp_body := DataFrame}) ->
         Data = binary_to_term(DataFrame),
         ?assertEqual(#{'query' => MQParam}, cowboy_req:match_qs([{'query', [], 'undefined'}], Data)),
