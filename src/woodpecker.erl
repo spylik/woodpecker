@@ -27,7 +27,7 @@
 -endif.
 
 -include("woodpecker.hrl").
-%-include("deps/teaser/include/utils.hrl").
+-include("deps/teaser/include/utils.hrl").
 
 %% gen server is here
 -behaviour(gen_server).
@@ -127,7 +127,7 @@ init({Host, Port, Options}) ->
     end,
 
     Heartbeat_freq = maps:get('heartbeat_freq', Options, 1000),
-    Requests_allowed_by_api = maps:get('requests_allowed_in_period', Options, 600000),
+    Requests_allowed_by_api = maps:get('requests_allowed_by_api', Options, 600000),
     Max_paralell_requests_per_conn = maps:get('max_paralell_requests_per_conn', Options, 8),
 
     TRef = erlang:send_after(Heartbeat_freq, self(), heartbeat),
@@ -207,6 +207,8 @@ handle_cast({'create_task', Method, Priority, Url, Headers, Body, Options}, Stat
     {noreply, create_task({Method, Priority, Url, Headers, Body, Options}, State)};
 
 % @doc handle_cast for stop
+%                gun_pids = Gun_pids#{Pid => #gun_pid_prop{gun_mon = GunMonRef, req_per_gun_quota = Max_total_req_per_conn}}
+
 handle_cast(stop, State) ->
     {stop, normal, State};
 
@@ -364,7 +366,7 @@ handle_info(Msg, State) ->
     State       :: term().
 
 terminate(_Reason, State) ->
-%    _ = flush_gun(State, 'undefined'),
+    _ = flush_gun(State, 'undefined'), % shutdown guns gracefuly
     _ = erlang:cancel_timer(State#woodpecker_state.heartbeat_tref).
 
 % @doc call back for code_change
@@ -566,9 +568,12 @@ chunk_data(OldData, NewData) ->
     Result  :: woodpecker_state().
 
 flush_gun(#woodpecker_state{
+            server = Server,
+            remote_host = RemoteHost,
+            remote_port = RemotePort,
             gun_pids = Gun_pids
         } = State, 'undefined') ->
-    error_logger:error_msg("Going to flush all gun processes"),
+    error_logger:info_msg("~p (~p:~p): Going to flush all gun processes",[Server, RemoteHost, RemotePort]),
     _ = lists:map(fun({Pid, #gun_pid_prop{gun_mon = MonRef}}) ->
             _ = case is_process_alive(Pid) of
                 true ->
