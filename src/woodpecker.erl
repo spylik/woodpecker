@@ -564,7 +564,7 @@ chunk_data(OldData, NewData) ->
 % when do not specify which GunPid we will clean all gun processes
 -spec flush_gun(State, GunPid) -> Result when
     State   :: woodpecker_state(),
-    GunPid  :: gun_pid(),
+    GunPid  :: gun_pid() | undefined,
     Result  :: woodpecker_state().
 
 flush_gun(#woodpecker_state{
