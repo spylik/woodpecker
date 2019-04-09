@@ -222,7 +222,7 @@ tests_with_gun_and_cowboy_test_() ->
                             }
                         ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => 'normal'}) || _A <- lists:seq(1,20)],
-                        timer:sleep(20),
+                        timer:sleep(100),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(20, length(Tasks)),
                         Tst = ets:select(ETSTable,[{#wp_api_tasks{status = 'new', priority = normal,max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
@@ -258,7 +258,7 @@ tests_with_gun_and_cowboy_test_() ->
                             }
                         ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => 'low'}) || _A <- lists:seq(1,20)],
-                        timer:sleep(20),
+                        timer:sleep(100),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(20, length(Tasks)),
                         Tst = ets:select(ETSTable,[{#wp_api_tasks{status = 'new', priority = low,max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
