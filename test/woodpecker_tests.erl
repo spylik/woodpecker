@@ -149,7 +149,7 @@ tests_with_gun_and_cowboy_test_() ->
                             }
                         ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]),[], #{priority => 'urgent'}) || _A <- lists:seq(1,15)],
-                        timer:sleep(20),
+                        timer:sleep(100),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(15, length(Tasks)),
                         Tst = ets:select(ETSTable,[{#wp_api_tasks{priority = urgent,max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
@@ -185,7 +185,7 @@ tests_with_gun_and_cowboy_test_() ->
                             }
                         ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => 'high'}) || _A <- lists:seq(1,15)],
-                        timer:sleep(20),
+                        timer:sleep(100),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(15, length(Tasks)),
                         Tst = ets:select(ETSTable,[{#wp_api_tasks{priority = high,max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
@@ -297,7 +297,7 @@ tests_with_gun_and_cowboy_test_() ->
                             }
                         ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => 'urgent'}) || _A <- lists:seq(1,SendReq)],
-                        timer:sleep(20),
+                        timer:sleep(100),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(SendReq, length(Tasks)),
                         Tst = ets:select(ETSTable,[{#wp_api_tasks{priority = urgent,max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
@@ -335,7 +335,7 @@ tests_with_gun_and_cowboy_test_() ->
                             }
                         ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => 'high'}) || _A <- lists:seq(1,SendReq)],
-                        timer:sleep(20),
+                        timer:sleep(100),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(SendReq, length(Tasks)),
                         Tst = ets:select(ETSTable,[{#wp_api_tasks{priority = 'high',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
@@ -375,7 +375,7 @@ tests_with_gun_and_cowboy_test_() ->
                         ),
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => 'urgent'}) || _A <- lists:seq(1,SendReq)],
                         [?TESTMODULE:get_async(Server,lists:append(["/?query=",integer_to_list(QueryParam)]), [], #{priority => 'high'}) || _A <- lists:seq(1,SendReq)],
-                        timer:sleep(20),
+                        timer:sleep(100),
                         Tasks = ets:tab2list(ETSTable),
                         ?assertEqual(SendReq*2, length(Tasks)),
                         Tst1 = ets:select(ETSTable,[{#wp_api_tasks{priority = 'urgent',max_retry = '$2',retry_count = '$1', _ = '_'},[{'<','$1',10},{'<','$1','$2'}],['$_']}]),
