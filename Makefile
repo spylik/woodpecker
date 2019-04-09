@@ -15,7 +15,6 @@ else
 ERLC_OPTS += +debug_info
 endif
 
-TEST_ERLC_OPTS += +'{parse_transform, lager_transform}' 
 TEST_ERLC_OPTS += +'{parse_transform, erlroute_transform}'
 TEST_ERLC_OPTS += +debug_info
 
@@ -29,7 +28,7 @@ ifeq ($(shell basename $(shell dirname $(shell dirname $(realpath $(lastword $(M
 endif
 
 DEPS 		= gun
-TEST_DEPS	= cowboy teaser lager erlroute
+TEST_DEPS	= cowboy teaser erlroute
 SHELL_DEPS	= sync
 
 # our deps
@@ -57,7 +56,7 @@ endif
 # Development enviroment ("make shell" to run it).
 # --------------------------------------------------------------------
 
-SHELL_OPTS = -config ${DEPS_DIR}/teaser/sys.config +c true +C multi_time_warp -pa ebin/ test/ -eval 'lager:start(), mlibs:discover()' -env ERL_LIBS deps -run mlibs autotest_on_compile
+SHELL_OPTS = -config ${DEPS_DIR}/teaser/sys.config +c true +C multi_time_warp -pa ebin/ test/ -eval 'mlibs:discover()' -env ERL_LIBS deps -run mlibs autotest_on_compile
 
 # --------------------------------------------------------------------
 # We using erlang.mk 
