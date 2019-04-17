@@ -476,7 +476,7 @@ request(#woodpecker_state{
     } = State, #wp_api_tasks{method = Method, url = Url, headers = Headers, body = Body, ref = OldReqRef, retry_count = Retry_count} = Task) ->
     ReqRef = case Body of
         'undefined' ->
-            gun:request(GunPid, Method, Url, Headers);
+            gun:request(GunPid, Method, Url, Headers, <<>>);
         _ ->
             gun:request(GunPid, Method, Url, Headers, Body)
     end,
