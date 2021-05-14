@@ -1,19 +1,20 @@
 PROJECT = woodpecker
 
 # --------------------------------------------------------------------
+# Defining OTP version for this project which uses by kerl
+# --------------------------------------------------------------------
+
+ifneq ($(shell basename $(shell dirname $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST)))))), deps)
+ERLANG_OTP = OTP-24.0-rc2
+endif
+
+# --------------------------------------------------------------------
 # Compilation.
 # --------------------------------------------------------------------
 
 # if ERLC_OPTS not defined in parent project, we going to define by our-self
 ERLC_OPTS ?= +warn_export_all +warn_export_vars +warn_unused_import +warn_untyped_record +warn_missing_spec +warn_missing_spec_all -Werror
-
-# if MODE is not defined it means we are in development enviroment
-ifeq ($(MODE),release)
-ERLC_OPTS += +native
-ERLC_OPTS += +'{hipe, [o3]}'
-else
 ERLC_OPTS += +debug_info
-endif
 
 TEST_ERLC_OPTS += +'{parse_transform, erlroute_transform}'
 TEST_ERLC_OPTS += +debug_info
@@ -59,7 +60,7 @@ endif
 SHELL_OPTS = -config ${DEPS_DIR}/teaser/sys.config +c true +C multi_time_warp -pa ebin/ test/ -eval 'mlibs:discover()' -env ERL_LIBS deps -run mlibs autotest_on_compile
 
 # --------------------------------------------------------------------
-# We using erlang.mk 
+# We using erlang.mk
 # --------------------------------------------------------------------
 
 include erlang.mk
