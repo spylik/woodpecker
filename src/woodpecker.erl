@@ -955,8 +955,8 @@ convert_to_map(#wp_api_tasks{
 % @doc ask woodpecker to POST data async to the URL with default 'normal' priority, empty headers
 -spec post_async(Server, Url, Body) -> 'ok' when
     Server  :: server(),
-    Url     :: url(),
-    Body    :: body().
+    Url     :: url() | fun(() -> url()),
+    Body    :: body() | fun(() -> body()).
 
 post_async(Server, Url, Body) ->
     post_async(Server, Url, Body, [], maps:new()).
@@ -964,9 +964,9 @@ post_async(Server, Url, Body) ->
 % @doc ask woodpecker to POST data async to the Url with empty headers
 -spec post_async(Server, Url, Body, Headers) -> 'ok' when
     Server      :: server(),
-    Url         :: url(),
-    Body        :: body(),
-    Headers     :: headers().
+    Url         :: url() | fun(() -> url()),
+    Body        :: body() | fun(() -> body()),
+    Headers     :: headers() | fun(() -> headers()).
 
 post_async(Server, Url, Body, Headers) ->
     post_async(Server, Url, Body, Headers, maps:new()).
@@ -976,9 +976,9 @@ post_async(Server, Url, Body, Headers) ->
 % ask woodpecker to POST async data to the Url
 -spec post_async(Server, Url, Body, Headers, Options) -> 'ok' when
     Server      :: server(),
-    Url         :: url(),
-    Body        :: body(),
-    Headers     :: headers(),
+    Url         :: url() | fun(() -> url()),
+    Body        :: body() | fun(() -> body()),
+    Headers     :: headers() | fun(() -> headers()),
     Options     :: request_opt().
 
 post_async(Server, Url, Body, Headers, Options) ->
@@ -999,7 +999,7 @@ post_async(Server, Url, Body, Headers, Options) ->
 % @doc ask woodpecker to async GET data from Url with default 'normal' priority, empty headers
 -spec get_async(Server, Url) -> 'ok' when
     Server  :: server(),
-    Url     :: url().
+    Url         :: url() | fun(() -> url()).
 
 get_async(Server, Url) ->
     get_async(Server, Url, [], maps:new()).
@@ -1007,8 +1007,8 @@ get_async(Server, Url) ->
 % @doc ask woodpecker to async GET data from Url with empty headers
 -spec get_async(Server, Url, Headers) -> 'ok' when
     Server      :: server(),
-    Url         :: url(),
-    Headers     :: headers().
+    Url         :: url() | fun(() -> url()),
+    Headers     :: headers() | fun(() -> headers()).
 
 get_async(Server, Url, Headers) ->
     get_async(Server, Url, Headers, maps:new()).
@@ -1017,8 +1017,8 @@ get_async(Server, Url, Headers) ->
 % ask woodpecker to async GET data from Url (body must be always empty for GET requsts)
 -spec get_async(Server, Url, Headers, Options) -> 'ok' when
     Server      :: server(),
-    Url         :: url(),
-    Headers     :: headers(),
+    Url         :: url() | fun(() -> url()),
+    Headers     :: headers() | fun(() -> headers()),
     Options     :: request_opt().
 
 get_async(Server, Url, Headers, Options) ->

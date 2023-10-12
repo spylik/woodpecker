@@ -99,7 +99,15 @@
 -type body()        :: 'undefined' | binary().
 -type isFin()       :: 'fin' | 'nofin'.
 -type stage()       :: 'order_stage' | 'cast_stage'.
--type newtaskmsg()  :: {'create_task', method(), priority(), url(), headers(), iodata()}.
+-type newtaskmsg()  :: {
+                            'create_task',
+                            method(),
+                            priority(),
+                            url() | fun(() -> url()),
+                            headers() | fun(() -> headers()),
+                            body() | fun(() -> body()),
+                            request_opt()
+                        }.
 -type headers()     :: [] | cow_http:headers().
 -type httpstatus()  :: 100..999.
 -type stream_ref()  :: reference().
