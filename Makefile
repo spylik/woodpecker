@@ -5,7 +5,7 @@ PROJECT = woodpecker
 # --------------------------------------------------------------------
 
 ifneq ($(shell basename $(shell dirname $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST)))))), deps)
-ERLANG_OTP = OTP-24.0-rc2
+ERLANG_OTP = OTP-$(shell cat ./.env | grep ERLANG_VERSION | sed -e s/^ERLANG_VERSION=//)
 endif
 
 # --------------------------------------------------------------------

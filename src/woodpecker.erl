@@ -27,7 +27,6 @@
 -endif.
 
 -include("woodpecker.hrl").
-%-include("deps/teaser/include/utils.hrl").
 
 %% gen server is here
 -behaviour(gen_server).
@@ -476,9 +475,9 @@ request(#woodpecker_state{
     } = State, #wp_api_tasks{method = Method, url = Url, headers = Headers, body = Body, ref = OldReqRef, retry_count = Retry_count} = Task) ->
     ReqRef = case Body of
         'undefined' ->
-            gun:request(GunPid, Method, Url, Headers, <<>>);
+            gun:request(GunPid, Method, may_apply(Url), may_apply(Headers), <<>>);
         _ ->
-            gun:request(GunPid, Method, Url, Headers, Body)
+            gun:request(GunPid, Method, may_apply(Url), may_apply(Headers), may_apply(Body))
     end,
     ets:delete(Ets, OldReqRef),
     ets:insert(State#woodpecker_state.ets,
@@ -507,6 +506,14 @@ request(#woodpecker_state{
                 GunPid, NewRPGQ
             )
     end.
+
+% @doc support of dynamic urls/headers/bodies
+-spec may_apply(ValueOrFun) -> Result when
+    ValueOrFun  :: url() | headers() | body() | fun(() -> url() | headers() | body()),
+    Result      :: url() | headers() | body().
+
+may_apply(ValueOrFun) when is_function(ValueOrFun) -> apply(ValueOrFun, []);
+may_apply(ValueOrFun) -> ValueOrFun.
 
 % @doc check is we need new gun_pid for next requests
 -spec check_reach_rpgq_quota(State, GunPid, NewRPGQ) -> Result when
