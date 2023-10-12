@@ -477,7 +477,8 @@ request(#woodpecker_state{
         'undefined' ->
             gun:request(GunPid, Method, may_apply(Url), may_apply(Headers), <<>>);
         _ ->
-            gun:request(GunPid, Method, may_apply(Url), may_apply(Headers), may_apply(Body))
+            CompletedBody = may_apply(Body),
+            gun:request(GunPid, Method, may_apply(Url), may_enrich_headers_with_content_length(Headers, CompletedBody), CompletedBody)
     end,
     ets:delete(Ets, OldReqRef),
     ets:insert(State#woodpecker_state.ets,
@@ -506,6 +507,31 @@ request(#woodpecker_state{
                 GunPid, NewRPGQ
             )
     end.
+
+-spec may_enrich_headers_with_content_length(HeadersOrFun, Body) -> Result when
+    HeadersOrFun    :: headers() | fun(() -> headers()),
+    Body            :: body(),
+    Result          :: headers().
+
+may_enrich_headers_with_content_length(HeadersFun, Body) when is_function(HeadersFun) ->
+    may_enrich_headers_with_content_length(may_apply(HeadersFun), Body);
+
+may_enrich_headers_with_content_length(Headers, Body) -> may_enrich_headers_with_content_length(Headers, Headers, Body).
+
+
+-spec may_enrich_headers_with_content_length(Headers, Headers, Body) -> Result when
+    Headers         :: headers(),
+    Body            :: body(),
+    Result          :: headers().
+
+may_enrich_headers_with_content_length([], Headers, Body) ->
+    [{<<"content-length">>, integer_to_binary(size(Body))} | Headers];
+
+may_enrich_headers_with_content_length([{<<"content-length">>, _} | _T], Headers, _Body) -> Headers;
+may_enrich_headers_with_content_length([{<<"Content-Length">>, _} | _T], Headers, _Body) -> Headers;
+may_enrich_headers_with_content_length([{<<"Content-length">>, _} | _T], Headers, _Body) -> Headers;
+
+may_enrich_headers_with_content_length([_H | T], Headers, Body) -> may_enrich_headers_with_content_length(T, Headers, Body).
 
 % @doc support of dynamic urls/headers/bodies
 -spec may_apply(ValueOrFun) -> Result when
