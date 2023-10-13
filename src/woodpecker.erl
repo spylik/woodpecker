@@ -23,6 +23,7 @@
 -module(woodpecker).
 -define(NOTEST, true).
 -ifdef(TEST).
+    -compile(nowarn_export_all).
     -compile(export_all).
 -endif.
 
@@ -117,7 +118,7 @@ stop('async', Server) ->
 
 init({Host, Port, Options}) ->
     Ets = generate_ets_name(Host, maps:get('register', Options, 'undefined')),
-    _ = ets:new(Ets, [ordered_set, protected, {keypos, #wp_api_tasks.ref}, named_table]),
+    _ = init_ets(Ets),
 
     Server = case maps:get('register', Options, 'undefined') of
         'undefined' -> self();
@@ -397,32 +398,55 @@ code_change(_OldVsn, State, _Extra) ->
     State       :: woodpecker_state(),
     Result      :: woodpecker_state().
 
+
 create_task({Method, Priority, Url, Headers, Body, Options}, State = #woodpecker_state{ets = Ets, report_nofin_to = ReportNoFinTo, report_to = ReportTo}) ->
     TempRef = erlang:make_ref(),
-    ets:insert(Ets,
-        Task = #wp_api_tasks{
-            ref             = {temp, TempRef},
-            status          = 'new',
-            priority        = Priority,
-            method          = Method,
-            url             = Url,
-            insert_date     = get_time(),
-            headers         = Headers,
-            body            = Body,
-            tags            = maps:get('tags', Options, 'undefined'),
-            nodupes_group   = maps:get('nodupes_group', Options, 'undefined'),
-            report_nofin_to = ReportNoFinTo,
-            report_to       = ReportTo
-        }),
-    Quota = get_quota(State),
-    case Priority of
-        'urgent' ->
-            request(connect(State#woodpecker_state{api_requests_current_quota = Quota}), Task);
-        'high' when Quota > 0 ->
-            request(connect(State#woodpecker_state{api_requests_current_quota = Quota}), Task);
-        _ ->
-            State
-    end.
+	Task = #wp_api_tasks{
+	    ref             = {temp, TempRef},
+	    status          = 'new',
+	    priority        = Priority,
+	    method          = Method,
+	    url             = Url,
+	    insert_date     = get_time(),
+	    headers         = Headers,
+	    body            = Body,
+	    tags            = maps:get('tags', Options, 'undefined'),
+	    nodupes_group   = maps:get('nodupes_group', Options, 'undefined'),
+		nonce_group		= maps:get('nonce_group', Options, 'undefined'),
+	    report_nofin_to = ReportNoFinTo,
+	    report_to       = ReportTo
+    },
+    ets:insert(Ets, Task),
+
+	case is_another_task_with_same_nonce_group_running(Ets, Task) of
+		false ->
+		    Quota = get_quota(State),
+		    case Priority of
+		        'urgent' ->
+		            request(connect(State#woodpecker_state{api_requests_current_quota = Quota}), Task);
+		        'high' when Quota > 0 ->
+		            request(connect(State#woodpecker_state{api_requests_current_quota = Quota}), Task);
+		        _ ->
+		            State
+		    end;
+		true ->
+			State
+	end.
+
+-spec is_another_task_with_same_nonce_group_running(Ets, WPTask) -> Result when
+	Ets		:: atom() | ets:tid(),
+	WPTask	:: wp_api_tasks(),
+	Result	:: boolean().
+
+is_another_task_with_same_nonce_group_running(_Ets, #wp_api_tasks{nonce_group = undefined}) -> false;
+is_another_task_with_same_nonce_group_running(Ets, #wp_api_tasks{nonce_group = SomeNonceGroup}) ->
+	MS = [{
+        #wp_api_tasks{status = 'processing', nonce_group = SomeNonceGroup, _ = '_'},
+            [],
+            [true]
+        }
+    ],
+    ets:select_count(Ets, MS) > 1.
 
 % @doc open new connection to the server or do nothing if connection present
 -spec connect(State) -> Result when
@@ -827,7 +851,7 @@ prepare_ms(#woodpecker_state{
 -spec run_task(State, Stage, Tasks) -> Result when
     State   :: woodpecker_state(),
     Stage   :: stage(),
-    Tasks   :: [[ets:match_spec()]],
+    Tasks   :: [[ets:match_spec()]] | [wp_api_tasks()],
     Result  :: woodpecker_state().
 
 % when head is empty going to check tail
@@ -859,8 +883,13 @@ run_task(State = #woodpecker_state{
     run_task(NewState, 'order_stage', [T1|T2]);
 
 %% run_task cast_stage
-run_task(State, 'cast_stage', [H|T]) ->
-    run_task(request(connect(State), H), 'cast_stage', T).
+run_task(#woodpecker_state{ets = Ets} = State, 'cast_stage', [H|T]) ->
+	case is_another_task_with_same_nonce_group_running(Ets, H) of
+		false ->
+    		run_task(request(connect(State), H), 'cast_stage', T);
+		true ->
+			run_task(State, 'cast_stage', T)
+	end.
 
 % @doc generate ERS table name
 -spec generate_ets_name(Host, RegisterOptions) -> Result when
@@ -887,6 +916,11 @@ generate_ets_name(Host, 'undefined') ->
 generate_ets_name(Name) ->
     list_to_atom(lists:append([atom_to_list(Name), "_api_tasks"])).
 
+-spec init_ets(Name) -> Result when
+    Name    :: atom(),
+    Result  :: ets:tid().
+
+init_ets(Name) -> ets:new(Name, [ordered_set, protected, {keypos, #wp_api_tasks.ref}, named_table]).
 
 % @doc get time
 -spec get_time() -> Result when

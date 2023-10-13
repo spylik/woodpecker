@@ -36,7 +36,8 @@
 -type request_opt() :: #{
     'priority'          => priority(),
     'tags'              => 'undefined' | tags(),
-    'nodupes_group'     => 'undefined' | term()
+    'nodupes_group'     => 'undefined' | term(),
+    'nonce_group'       => 'undefined' | term()
 }.
 
 -type output()      :: #{
@@ -127,6 +128,7 @@
         max_retry = 9999        :: non_neg_integer() | mspec(),
         retry_count = 0         :: non_neg_integer() | mspec(),
         nodupes_group           :: 'undefined' | term() | mspec(),
+        nonce_group             :: 'undefined' | term() | mspec(),
         insert_date             :: pos_integer() | mspec(),
         report_nofin_to         :: 'undefined' | report() | mspec(),
         report_to               :: 'undefined' | report() | mspec(),

@@ -1,5 +1,5 @@
 % ATTENTION: do not run this tests on production nodes
-% we using mlibs:random_atom for creating random names for servers,
+% we using tutils:random_atom for creating random names for servers,
 % but atoms will not garbage collected
 
 -module(woodpecker_tests).
@@ -27,6 +27,18 @@
     ).
 
 % --------------------------------- fixtures ----------------------------------
+
+match_spec_test() ->
+    Ets = ?TESTMODULE:init_ets(tutils:random_atom()),
+    NonceGroupTask = #wp_api_tasks{ref = make_ref(), status = new, nonce_group = 1},
+    ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = processing, nonce_group = 2}),
+    ?assertNot(?TESTMODULE:is_another_task_with_same_nonce_group_running(Ets, NonceGroupTask)),
+    ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = processing, nonce_group = 1}),
+    ?assertNot(?TESTMODULE:is_another_task_with_same_nonce_group_running(Ets, NonceGroupTask)),
+    ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = new, nonce_group = 1}),
+    ?assertNot(?TESTMODULE:is_another_task_with_same_nonce_group_running(Ets, NonceGroupTask)),
+    ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = processing, nonce_group = 1}),
+    ?assert(?TESTMODULE:is_another_task_with_same_nonce_group_running(Ets, NonceGroupTask)).
 
 % tests for cover standart otp behaviour
 otp_test_() ->
@@ -135,7 +147,7 @@ tests_with_gun_and_cowboy_test_() ->
                         QueryParam = erlang:unique_integer([monotonic,positive]),
                         MQParam = integer_to_binary(QueryParam),
                         WaitAt = tutils:spawn_wait_loop_max(25,?SpawnWaitLoop),
-                        Server = mlibs:random_atom(),
+                        Server = tutils:random_atom(),
                         Max_paralell_requests_per_conn = 2,
                         ETSTable = woodpecker:generate_ets_name(?TESTHOST, ?REGISTERAS(Server)),
                         ?TESTMODULE:start_link(
@@ -171,7 +183,7 @@ tests_with_gun_and_cowboy_test_() ->
                         QueryParam = erlang:unique_integer([monotonic,positive]),
                         MQParam = integer_to_binary(QueryParam),
                         WaitAt = tutils:spawn_wait_loop_max(25,?SpawnWaitLoop),
-                        Server = mlibs:random_atom(),
+                        Server = tutils:random_atom(),
                         Max_paralell_requests_per_conn = 2,
                         ETSTable = woodpecker:generate_ets_name(?TESTHOST, ?REGISTERAS(Server)),
                         ?TESTMODULE:start_link(
@@ -208,7 +220,7 @@ tests_with_gun_and_cowboy_test_() ->
                         QueryParam = erlang:unique_integer([monotonic,positive]),
                         MQParam = integer_to_binary(QueryParam),
                         WaitAt = tutils:spawn_wait_loop_max(10,?SpawnWaitLoop),
-                        Server = mlibs:random_atom(),
+                        Server = tutils:random_atom(),
                         Max_paralell_requests_per_conn = 2,
                         ETSTable = woodpecker:generate_ets_name(?TESTHOST, ?REGISTERAS(Server)),
                         ?TESTMODULE:start_link(
@@ -244,7 +256,7 @@ tests_with_gun_and_cowboy_test_() ->
                         QueryParam = erlang:unique_integer([monotonic,positive]),
                         MQParam = integer_to_binary(QueryParam),
                         WaitAt = tutils:spawn_wait_loop_max(10,?SpawnWaitLoop),
-                        Server = mlibs:random_atom(),
+                        Server = tutils:random_atom(),
                         Max_paralell_requests_per_conn = 2,
                         ETSTable = woodpecker:generate_ets_name(?TESTHOST, ?REGISTERAS(Server)),
                         ?TESTMODULE:start_link(
@@ -280,7 +292,7 @@ tests_with_gun_and_cowboy_test_() ->
                         QueryParam = erlang:unique_integer([monotonic,positive]),
                         MQParam = integer_to_binary(QueryParam),
                         WaitAt = tutils:spawn_wait_loop_max(20,?SpawnWaitLoop),
-                        Server = mlibs:random_atom(),
+                        Server = tutils:random_atom(),
                         Requests_allowed_by_api = 1,
                         Requests_allowed_in_period = 10000,
                         SendReq = 10,
@@ -318,7 +330,7 @@ tests_with_gun_and_cowboy_test_() ->
                         QueryParam = erlang:unique_integer([monotonic,positive]),
                         MQParam = integer_to_binary(QueryParam),
                         WaitAt = tutils:spawn_wait_loop_max(10,?SpawnWaitLoop),
-                        Server = mlibs:random_atom(),
+                        Server = tutils:random_atom(),
                         Requests_allowed_by_api = 1,
                         Requests_allowed_in_period = 10000,
                         SendReq = 10,
@@ -357,7 +369,7 @@ tests_with_gun_and_cowboy_test_() ->
                         QueryParam = erlang:unique_integer([monotonic,positive]),
                         MQParam = integer_to_binary(QueryParam),
                         WaitAt = tutils:spawn_wait_loop_max(21,?SpawnWaitLoop),
-                        Server = mlibs:random_atom(),
+                        Server = tutils:random_atom(),
                         Requests_allowed_by_api = 11,
                         Requests_allowed_in_period = 1000,
                         SendReq = 10,
@@ -403,7 +415,7 @@ tests_with_gun_and_cowboy_test_() ->
                         QueryParam = erlang:unique_integer([monotonic,positive]),
                         MQParam = integer_to_binary(QueryParam),
                         WaitAt = tutils:spawn_wait_loop_max(10,?SpawnWaitLoop),
-                        Server = mlibs:random_atom(),
+                        Server = tutils:random_atom(),
                         Requests_allowed_by_api = 5,
                         Requests_allowed_in_period = 10000,
                         SendReq = 10,
@@ -448,7 +460,7 @@ tests_with_gun_and_cowboy_test_() ->
                         QueryParam = erlang:unique_integer([monotonic,positive]),
                         MQParam = integer_to_binary(QueryParam),
                         WaitAt = tutils:spawn_wait_loop_max(10,?SpawnWaitLoop),
-                        Server = mlibs:random_atom(),
+                        Server = tutils:random_atom(),
                         Requests_allowed_by_api = 5,
                         Requests_allowed_in_period = 10000,
                         SendReq = 10,
@@ -510,7 +522,7 @@ tests_with_gun_and_slowcowboy_test_() ->
                         QueryParam = erlang:unique_integer([monotonic,positive]),
                         MQParam = integer_to_binary(QueryParam),
                         WaitAt = tutils:spawn_wait_loop_max(10,?SpawnWaitLoop),
-                        Server = mlibs:random_atom(),
+                        Server = tutils:random_atom(),
                         Max_paralell_requests_per_conn = 2,
                         TimerForCowboy = 20,
                         ETSTable = woodpecker:generate_ets_name(?TESTHOST, ?REGISTERAS(Server)),
@@ -553,7 +565,7 @@ simple(get, Priority, NumberOfRequests) ->
     QueryParam = erlang:unique_integer([monotonic,positive]),
     MQParam = integer_to_binary(QueryParam),
     WaitAt = tutils:spawn_wait_loop_max(3,100),
-    Server = mlibs:random_atom(),
+    Server = tutils:random_atom(),
     ?TESTMODULE:start_link(
         ?TESTHOST,
         ?TESTPORT,

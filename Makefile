@@ -33,7 +33,7 @@ TEST_DEPS	= cowboy teaser erlroute
 SHELL_DEPS	= sync
 
 # our deps
-dep_teaser 		= git https://github.com/spylik/teaser 		master
+dep_teaser 		= git https://github.com/spylik/teaser 		develop
 dep_erlroute 	= git https://github.com/spylik/erlroute	master
 # 3-rd party deps
 dep_gun 	    = git https://github.com/ninenines/gun				1.0.0
