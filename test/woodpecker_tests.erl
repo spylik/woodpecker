@@ -33,9 +33,9 @@ match_spec_test() ->
     NonceGroupTask = #wp_api_tasks{ref = make_ref(), status = new, nonce_group = {1,1}},
     ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = processing, nonce_group = {2,2}}),
     ?assertNot(?TESTMODULE:is_another_task_with_same_nonce_group_running(Ets, NonceGroupTask)),
-    ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = processing, nonce_group = {1,1}}),
-    ?assertNot(?TESTMODULE:is_another_task_with_same_nonce_group_running(Ets, NonceGroupTask)),
     ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = new, nonce_group = {1,1}}),
+    ?assertNot(?TESTMODULE:is_another_task_with_same_nonce_group_running(Ets, NonceGroupTask)),
+    ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = got_fin, nonce_group = {1,1}}),
     ?assertNot(?TESTMODULE:is_another_task_with_same_nonce_group_running(Ets, NonceGroupTask)),
     ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = processing, nonce_group = {1,1}}),
     ?assert(?TESTMODULE:is_another_task_with_same_nonce_group_running(Ets, NonceGroupTask)).

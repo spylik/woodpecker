@@ -440,7 +440,7 @@ create_task({Method, Priority, Url, Headers, Body, Options}, State = #woodpecker
 
 is_another_task_with_same_nonce_group_running(_Ets, #wp_api_tasks{nonce_group = undefined}) -> false;
 is_another_task_with_same_nonce_group_running(Ets, #wp_api_tasks{nonce_group = SomeNonceGroup}) ->
-	MS = [{
+    MS = [{
         #wp_api_tasks{status = '$1', nonce_group = SomeNonceGroup, _ = '_'},
             [
                 {'orelse',
@@ -452,7 +452,7 @@ is_another_task_with_same_nonce_group_running(Ets, #wp_api_tasks{nonce_group = S
             [true]
         }
     ],
-    ets:select_count(Ets, MS) > 1.
+    ets:select_count(Ets, MS) > 0.
 
 % @doc open new connection to the server or do nothing if connection present
 -spec connect(State) -> Result when
