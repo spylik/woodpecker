@@ -441,8 +441,14 @@ create_task({Method, Priority, Url, Headers, Body, Options}, State = #woodpecker
 is_another_task_with_same_nonce_group_running(_Ets, #wp_api_tasks{nonce_group = undefined}) -> false;
 is_another_task_with_same_nonce_group_running(Ets, #wp_api_tasks{nonce_group = SomeNonceGroup}) ->
 	MS = [{
-        #wp_api_tasks{status = 'processing', nonce_group = SomeNonceGroup, _ = '_'},
-            [],
+        #wp_api_tasks{status = '$1', nonce_group = SomeNonceGroup, _ = '_'},
+            [
+                {'orelse',
+                    {'=:=','$1','processing'},
+                    {'=:=','$1','got_gun_response'},
+                    {'=:=','$1','got_nofin_data'}
+                }
+            ],
             [true]
         }
     ],
