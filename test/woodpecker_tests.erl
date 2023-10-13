@@ -30,14 +30,14 @@
 
 match_spec_test() ->
     Ets = ?TESTMODULE:init_ets(tutils:random_atom()),
-    NonceGroupTask = #wp_api_tasks{ref = make_ref(), status = new, nonce_group = 1},
-    ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = processing, nonce_group = 2}),
+    NonceGroupTask = #wp_api_tasks{ref = make_ref(), status = new, nonce_group = {1,1}},
+    ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = processing, nonce_group = {2,2}}),
     ?assertNot(?TESTMODULE:is_another_task_with_same_nonce_group_running(Ets, NonceGroupTask)),
-    ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = processing, nonce_group = 1}),
+    ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = processing, nonce_group = {1,1}}),
     ?assertNot(?TESTMODULE:is_another_task_with_same_nonce_group_running(Ets, NonceGroupTask)),
-    ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = new, nonce_group = 1}),
+    ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = new, nonce_group = {1,1}}),
     ?assertNot(?TESTMODULE:is_another_task_with_same_nonce_group_running(Ets, NonceGroupTask)),
-    ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = processing, nonce_group = 1}),
+    ets:insert(Ets, #wp_api_tasks{ref = make_ref(), status = processing, nonce_group = {1,1}}),
     ?assert(?TESTMODULE:is_another_task_with_same_nonce_group_running(Ets, NonceGroupTask)).
 
 % tests for cover standart otp behaviour
