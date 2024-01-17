@@ -466,7 +466,8 @@ connect(#woodpecker_state{
         max_total_req_per_conn = Max_total_req_per_conn,
         gun_pids = Gun_pids} = State) ->
     error_logger:info_msg("Going connect to ~p:~p",[Remote_host,Remote_port]),
-    {ok, Pid} = gun:open(Remote_host, Remote_port),
+    TLSOpts = [{verify, verify_peer}, {cacerts, public_key:cacerts_get()}],
+    {ok, Pid} = gun:open(Remote_host, Remote_port, #{tls_opts => TLSOpts}),
 	GunMonRef = monitor(process, Pid),
     case gun:await_up(Pid, 10000, GunMonRef) of
         {ok, Protocol} ->
