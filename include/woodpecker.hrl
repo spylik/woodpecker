@@ -109,7 +109,7 @@
                             body() | fun(() -> body()),
                             request_opt()
                         }.
--type headers()     :: [] | cow_http:headers().
+-type headers()     :: [] | gun:req_headers().
 -type httpstatus()  :: 100..999.
 -type stream_ref()  :: reference().
 -type gun_pid()     :: pid().
