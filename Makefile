@@ -36,9 +36,9 @@ SHELL_DEPS	= sync
 dep_teaser 		= git https://github.com/spylik/teaser 		develop
 dep_erlroute 	= git https://github.com/spylik/erlroute	master
 # 3-rd party deps
-dep_gun 	    = git https://github.com/ninenines/gun				1.0.0
-dep_ranch		= git https://github.com/ninenines/ranch			1.4.0
-dep_cowboy      = git https://github.com/ninenines/cowboy.git       2.0.0
+dep_gun 	    = git https://github.com/ninenines/gun				master
+dep_ranch		= git https://github.com/ninenines/ranch			master
+dep_cowboy      = git https://github.com/ninenines/cowboy.git       master
 
 # use with travis
 ifeq ($(USER),travis)
