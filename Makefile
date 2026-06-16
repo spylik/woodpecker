@@ -16,7 +16,6 @@ endif
 ERLC_OPTS ?= +warn_export_all +warn_export_vars +warn_unused_import +warn_untyped_record +warn_missing_spec +warn_missing_spec_all -Werror
 ERLC_OPTS += +debug_info
 
-TEST_ERLC_OPTS += +'{parse_transform, erlroute_transform}'
 TEST_ERLC_OPTS += +debug_info
 
 # --------------------------------------------------------------------
@@ -34,7 +33,7 @@ SHELL_DEPS	= sync
 
 # our deps
 dep_teaser 		= git https://github.com/spylik/teaser 		develop
-dep_erlroute 	= git https://github.com/spylik/erlroute	master
+dep_erlroute 	= git https://github.com/spylik/erlroute	simplify
 # 3-rd party deps
 dep_gun 	    = git https://github.com/ninenines/gun				master
 dep_ranch		= git https://github.com/ninenines/ranch			master

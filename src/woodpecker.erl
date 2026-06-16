@@ -945,10 +945,10 @@ get_time() ->
 send_nofin_output(_State, #wp_api_tasks{report_nofin_to = 'undefined'}) -> ok;
 send_nofin_output(_State, #wp_api_tasks{report_nofin_to = {'message', ReportTo}} = Frame) ->
     ReportTo ! convert_to_map(Frame);
-send_nofin_output(#woodpecker_state{server = Server}, #wp_api_tasks{
+send_nofin_output(_State, #wp_api_tasks{
             report_nofin_to = {'erlroute', ReportTopic}
         } = Frame) ->
-    erlroute:pub(?MODULE, Server, ?LINE, ReportTopic, convert_to_map(Frame), 'hybrid', '$erlroute_cmp_woodpecker').
+    erlroute:pub(ReportTopic, convert_to_map(Frame)).
 
 
 % @doc send output
@@ -959,10 +959,10 @@ send_nofin_output(#woodpecker_state{server = Server}, #wp_api_tasks{
 send_output(_State, #wp_api_tasks{report_to = 'undefined'}) -> ok;
 send_output(_State, #wp_api_tasks{report_to = {'message', ReportTo}} = Frame) ->
     ReportTo ! convert_to_map(Frame);
-send_output(#woodpecker_state{server = Server}, #wp_api_tasks{
+send_output(_State, #wp_api_tasks{
             report_to = {'erlroute', ReportTopic}
         } = Frame) ->
-    erlroute:pub(?MODULE, Server, ?LINE, ReportTopic, convert_to_map(Frame), 'hybrid', '$erlroute_cmp_woodpecker').
+    erlroute:pub(ReportTopic, convert_to_map(Frame)).
 
 % @doc convert output to map
 -spec convert_to_map(Frame) -> Result when
