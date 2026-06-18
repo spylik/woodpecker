@@ -33,7 +33,7 @@ SHELL_DEPS	= sync
 
 # our deps
 dep_teaser 		= git https://github.com/spylik/teaser 		develop
-dep_erlroute 	= git https://github.com/spylik/erlroute	simplify
+dep_erlroute 	= git https://github.com/spylik/erlroute	master
 # 3-rd party deps
 dep_gun 	    = git https://github.com/ninenines/gun				master
 dep_ranch		= git https://github.com/ninenines/ranch			master
