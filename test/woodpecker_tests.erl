@@ -19,11 +19,10 @@
 -define(SpawnWaitLoop, 200).
 -define(RecieveLoop, 250).
 -define(RanchOpts,
-        [
-            {port, ?TESTPORT},
-            {connection_type, 'worker'},
-            {num_acceptors, 10}
-        ]
+        #{
+            socket_opts => [{port, ?TESTPORT}],
+            num_acceptors => 10
+        }
     ).
 
 % --------------------------------- fixtures ----------------------------------
@@ -101,6 +100,7 @@ tests_with_gun_and_cowboy_test_() ->
         fun() ->
             ToStop = tutils:setup_start([{'apps',[ranch,cowboy,crypto,asn1,public_key,ssl,cowlib,gun]}]),
             CowboyRanchRef = start_cowboy(?RanchOpts),
+            ok = warm_up(),
             [{'tostop', ToStop}, {'ranch_ref', CowboyRanchRef}]
         end,
         % cleanup
@@ -508,6 +508,7 @@ tests_with_gun_and_slowcowboy_test_() ->
         fun() ->
             ToStop = tutils:setup_start([{'apps',[ranch,cowboy,crypto,asn1,public_key,ssl,cowlib,gun]}]),
             CowboyRanchRef = start_cowboy(?RanchOpts),
+            ok = warm_up(),
             [{'tostop', ToStop}, {'ranch_ref', CowboyRanchRef}]
         end,
         % cleanup
@@ -560,6 +561,190 @@ tests_with_gun_and_slowcowboy_test_() ->
     }.
 
 
+nodupes_priority_test_() ->
+    {setup,
+        fun() ->
+            ToStop = tutils:setup_start([{'apps',[ranch,cowboy,crypto,asn1,public_key,ssl,cowlib,gun]}]),
+            CowboyRanchRef = start_cowboy(?RanchOpts),
+            ok = warm_up(),
+            [{'tostop', ToStop}, {'ranch_ref', CowboyRanchRef}]
+        end,
+        fun([{'tostop', ToStop},{'ranch_ref', CowboyRanchRef}]) ->
+            cowboy:stop_listener(CowboyRanchRef),
+            tutils:cleanup_stop(ToStop)
+        end,
+        {foreach, fun start_quiet_server/0, fun stop_quiet_server/1, [
+            fun({Server, Ets, Inbox}) ->
+                {<<"a higher-priority duplicate raises a queued task and sends it at once">>, fun() ->
+                    Group = make_ref(),
+                    ?TESTMODULE:get_async(Server, "/?query=q", [], #{priority => 'low', nodupes_group => Group}),
+                    ?assertMatch([#wp_api_tasks{priority = 'low', status = 'new'}], settled_tasks(Server, Ets)),
+                    ?TESTMODULE:get_async(Server, "/?query=q", [], #{priority => 'high', nodupes_group => Group}),
+                    ?assertEqual(1, length(responses(Inbox, 1, 2000))),
+                    ?assertMatch([#wp_api_tasks{priority = 'high', status = 'got_fin_data'}], settled_tasks(Server, Ets))
+                end}
+            end,
+            fun({Server, Ets, Inbox}) ->
+                {<<"a duplicate of lower or equal priority leaves a queued task as it was">>, fun() ->
+                    Group = make_ref(),
+                    ?TESTMODULE:get_async(Server, "/?query=q", [], #{priority => 'normal', nodupes_group => Group}),
+                    ?TESTMODULE:get_async(Server, "/?query=q", [], #{priority => 'low', nodupes_group => Group}),
+                    ?TESTMODULE:get_async(Server, "/?query=q", [], #{priority => 'normal', nodupes_group => Group}),
+                    ?assertMatch([#wp_api_tasks{priority = 'normal', status = 'new'}], settled_tasks(Server, Ets))
+                end}
+            end,
+            fun({Server, Ets, Inbox}) ->
+                {<<"a higher-priority duplicate of a task already sent is queued behind it">>, fun() ->
+                    Group = make_ref(),
+                    ?TESTMODULE:get_async(Server, "/?query=slow&wait=400", [], #{priority => 'normal', nodupes_group => Group}),
+                    Server ! 'heartbeat',
+                    ?assertMatch([#wp_api_tasks{status = 'processing'}], settled_tasks(Server, Ets)),
+                    ?TESTMODULE:get_async(Server, "/?query=fresh", [], #{priority => 'high', nodupes_group => Group}),
+                    ?assertEqual(2, length(settled_tasks(Server, Ets))),
+                    ?assertEqual([<<"fresh">>, <<"slow">>], lists:sort([query_of(R) || R <- responses(Inbox, 2, 3000)]))
+                end}
+            end,
+            fun({Server, Ets, Inbox}) ->
+                {<<"a duplicate of no higher priority than the task already sent is dropped">>, fun() ->
+                    Group = make_ref(),
+                    ?TESTMODULE:get_async(Server, "/?query=slow&wait=400", [], #{priority => 'high', nodupes_group => Group}),
+                    ?assertMatch([#wp_api_tasks{status = 'processing'}], settled_tasks(Server, Ets)),
+                    ?TESTMODULE:get_async(Server, "/?query=again", [], #{priority => 'high', nodupes_group => Group}),
+                    ?TESTMODULE:get_async(Server, "/?query=again", [], #{priority => 'low', nodupes_group => Group}),
+                    ?assertEqual(1, length(settled_tasks(Server, Ets))),
+                    ?assertEqual([<<"slow">>], [query_of(R) || R <- responses(Inbox, 2, 1500)])
+                end}
+            end
+        ]}
+    }.
+
+budget_test_() ->
+    {setup,
+        fun() ->
+            ToStop = tutils:setup_start([{'apps',[ranch,cowboy,crypto,asn1,public_key,ssl,cowlib,gun]}]),
+            CowboyRanchRef = start_cowboy(?RanchOpts),
+            ok = warm_up(),
+            [{'tostop', ToStop}, {'ranch_ref', CowboyRanchRef}]
+        end,
+        fun([{'tostop', ToStop},{'ranch_ref', CowboyRanchRef}]) ->
+            cowboy:stop_listener(CowboyRanchRef),
+            tutils:cleanup_stop(ToStop)
+        end,
+        [
+            {foreach, fun() -> start_quiet_server(#{budget_allowed_by_api => 500, budget_allowed_in_period => 60000}) end,
+                fun stop_quiet_server/1, [
+                fun({Server, Ets, _Inbox}) ->
+                    {<<"high requests go at once while they fit the budget; the rest wait queued">>, fun() ->
+                        [ask(Server, N, 'high', 250) || N <- lists:seq(1, 3)],
+                        ?assertEqual([sent, sent, queued], states(Server, Ets))
+                    end}
+                end,
+                fun({Server, Ets, _Inbox}) ->
+                    {<<"the heartbeat sends a request of any priority only if it fits the budget">>, fun() ->
+                        ask(Server, 1, 'normal', 250),
+                        ask(Server, 2, 'low', 250),
+                        ask(Server, 3, 'low', 250),
+                        Server ! 'heartbeat',
+                        ?assertEqual([sent, sent, queued], states(Server, Ets))
+                    end}
+                end,
+                fun({Server, Ets, _Inbox}) ->
+                    {<<"a request that does not fit holds back cheaper ones queued behind it">>, fun() ->
+                        ask(Server, 1, 'high', 300),
+                        ask(Server, 2, 'normal', 250),
+                        ask(Server, 3, 'low', 1),
+                        Server ! 'heartbeat',
+                        ?assertEqual([sent, queued, queued], states(Server, Ets))
+                    end}
+                end,
+                fun({Server, Ets, _Inbox}) ->
+                    {<<"urgent requests do not wait for the budget, as they do not wait for the request quota">>, fun() ->
+                        ask(Server, 1, 'high', 500),
+                        ask(Server, 2, 'urgent', 250),
+                        ?assertEqual([sent, sent], states(Server, Ets))
+                    end}
+                end
+            ]},
+            {foreach, fun() -> start_quiet_server(#{budget_allowed_by_api => 3}) end,
+                fun stop_quiet_server/1, [
+                fun({Server, Ets, _Inbox}) ->
+                    {<<"a request that supplies no budget spends 1">>, fun() ->
+                        [?TESTMODULE:get_async(Server, "/?query=q" ++ integer_to_list(N), [], #{priority => 'high'}) || N <- lists:seq(1, 4)],
+                        ?assertEqual([sent, sent, sent, queued], states(Server, Ets))
+                    end}
+                end
+            ]},
+            {foreach, fun() -> start_quiet_server(#{budget_allowed_by_api => 250, budget_allowed_in_period => 300}) end,
+                fun stop_quiet_server/1, [
+                fun({Server, Ets, _Inbox}) ->
+                    {<<"the budget comes back once its period has passed">>, fun() ->
+                        ask(Server, 1, 'high', 250),
+                        ask(Server, 2, 'high', 250),
+                        ?assertEqual([sent, queued], states(Server, Ets)),
+                        timer:sleep(350),
+                        Server ! 'heartbeat',
+                        ?assertEqual([sent, sent], states(Server, Ets))
+                    end}
+                end
+            ]},
+            {foreach, fun() -> start_quiet_server(#{}) end,
+                fun stop_quiet_server/1, [
+                fun({Server, Ets, _Inbox}) ->
+                    {<<"without budget_allowed_by_api the budget is unlimited">>, fun() ->
+                        [ask(Server, N, 'high', 100000) || N <- lists:seq(1, 3)],
+                        ?assertEqual([sent, sent, sent], states(Server, Ets))
+                    end}
+                end
+            ]}
+        ]
+    }.
+
+ask(Server, N, Priority, Budget) ->
+    ?TESTMODULE:get_async(Server, "/?query=q" ++ integer_to_list(N), [], #{priority => Priority, budget => Budget}).
+
+states(Server, Ets) ->
+    [case Status of 'new' -> queued; _ -> sent end
+     || {_, Status} <- lists:sort([{U, St} || #wp_api_tasks{url = U, status = St} <- settled_tasks(Server, Ets)])].
+
+start_quiet_server() -> start_quiet_server(#{}).
+
+start_quiet_server(Options) ->
+    Inbox = spawn(fun() -> inbox([]) end),
+    Server = tutils:random_atom(),
+    {ok, _} = ?TESTMODULE:start_link(?TESTHOST, ?TESTPORT, maps:merge(#{
+        register => ?REGISTERAS(Server),
+        report_to => {'message', Inbox},
+        heartbeat_freq => 3600000
+    }, Options)),
+    {Server, woodpecker:generate_ets_name(?TESTHOST, ?REGISTERAS(Server)), Inbox}.
+
+stop_quiet_server({Server, _Ets, Inbox}) ->
+    ?TESTMODULE:stop(Server),
+    exit(Inbox, kill),
+    ok.
+
+inbox(Acc) ->
+    receive
+        {read, Pid} -> Pid ! {inbox, lists:reverse(Acc)}, inbox(Acc);
+        #{resp_body := _} = Resp -> inbox([Resp | Acc])
+    end.
+
+settled_tasks(Server, Ets) ->
+    _ = sys:get_state(Server),
+    ets:tab2list(Ets).
+
+responses(Inbox, Max, Timeout) ->
+    Inbox ! {read, self()},
+    L = receive {inbox, Got} -> Got end,
+    case length(L) >= Max orelse Timeout =< 0 of
+        true -> L;
+        false -> receive after 20 -> responses(Inbox, Max, Timeout - 20) end
+    end.
+
+query_of(#{resp_body := Body}) ->
+    #{'query' := Query} = cowboy_req:match_qs([{'query', [], 'undefined'}], binary_to_term(Body)),
+    Query.
+
 % simple test
 simple(get, Priority, NumberOfRequests) ->
     QueryParam = erlang:unique_integer([monotonic,positive]),
@@ -588,6 +773,15 @@ simple(get, Priority, NumberOfRequests) ->
     end, Acc),
     ?TESTMODULE:stop(Server).
 
+
+warm_up() ->
+    _ = public_key:cacerts_get(),
+    {ok, Pid} = gun:open(?TESTHOST, ?TESTPORT),
+    {ok, _Protocol} = gun:await_up(Pid, 5000),
+    StreamRef = gun:get(Pid, "/?query=warm_up"),
+    {response, nofin, 200, _Headers} = gun:await(Pid, StreamRef, 5000),
+    {ok, _Body} = gun:await_body(Pid, StreamRef, 5000),
+    ok = gun:close(Pid).
 
 start_cowboy(RanchOpts) ->
     Dispatch = cowboy_router:compile([

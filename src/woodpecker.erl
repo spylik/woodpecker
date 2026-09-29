@@ -153,6 +153,8 @@ init({Host, Port, Options}) ->
             max_freeze_for_incomplete_requests = maps:get('max_freeze_for_incomplete_requests', Options, 3600000),
             heartbeat_freq = Heartbeat_freq,
             cleanup_completed_requests = maps:get('cleanup_completed_requests', Options, true),
+            budget_allowed_by_api = maps:get('budget_allowed_by_api', Options, 'infinity'),
+            budget_allowed_in_period = maps:get('budget_allowed_in_period', Options, maps:get('requests_allowed_in_period', Options, 600000)),
             % determined at init
             ets = Ets,
             api_requests_current_quota = Requests_allowed_by_api,
@@ -191,13 +193,23 @@ handle_cast({'create_task', Method, Priority, Url, Headers, Body, #{'nodupes_gro
                 [
                     {'=/=','$1','got_fin_data'}
                 ],
-                [true]
+                ['$_']
             }
         ],
-    NewState = case ets:select_count(Ets, MS) > 0 of
-        false -> create_task({Method, Priority, Url, Headers, Body, Options}, State);
-        true ->
-            State
+    {Queued, Sent} = lists:partition(fun is_queued/1, ets:select(Ets, MS)),
+    NewState = case {Queued, Sent} of
+        {[], []} ->
+            create_task({Method, Priority, Url, Headers, Body, Options}, State);
+        {[], _Sent} ->
+            case priority_rank(Priority) > lists:max([priority_rank(P) || #wp_api_tasks{priority = P} <- Sent]) of
+                true -> create_task({Method, Priority, Url, Headers, Body, Options}, State);
+                false -> State
+            end;
+        {[#wp_api_tasks{priority = QueuedPriority} = Task | _], _Sent} ->
+            case priority_rank(Priority) > priority_rank(QueuedPriority) of
+                true -> raise_priority(Task, Priority, State);
+                false -> State
+            end
     end,
     {noreply, NewState};
 
@@ -231,6 +243,7 @@ handle_cast(Msg, State) ->
 handle_info('heartbeat', State = #woodpecker_state{
         heartbeat_tref = Heartbeat_tref,
         requests_allowed_in_period = Requests_allowed_in_period,
+        budget_allowed_in_period = Budget_allowed_in_period,
         max_paralell_requests_per_conn = Max_paralell_requests_per_conn,
         ets = Ets,
         heartbeat_freq = Heartbeat_freq,
@@ -244,13 +257,14 @@ handle_info('heartbeat', State = #woodpecker_state{
     % going to run task if have quota
     NewState = run_task(State#woodpecker_state{
             api_requests_current_quota = OldQuota,
+            api_budget_current_quota = get_budget_quota(State),
             paralell_requests_current_quota = Max_paralell_requests_per_conn-active_requests(Ets)
         }, 'order_stage', prepare_ms(State)),
 
     % going to delete completed requests
     _ = case Cleanup_completed_requests of
         true ->
-            clean_completed(Ets,NewThan);
+            clean_completed(Ets, get_time() - max(Requests_allowed_in_period, Budget_allowed_in_period));
         false ->
             ok
     end,
@@ -413,25 +427,65 @@ create_task({Method, Priority, Url, Headers, Body, Options}, State = #woodpecker
 	    tags            = maps:get('tags', Options, 'undefined'),
 	    nodupes_group   = maps:get('nodupes_group', Options, 'undefined'),
 		nonce_group		= maps:get('nonce_group', Options, 'undefined'),
+	    budget          = maps:get('budget', Options, 1),
 	    report_nofin_to = ReportNoFinTo,
 	    report_to       = ReportTo
     },
     ets:insert(Ets, Task),
+    may_start_now(Task, State).
 
+-spec may_start_now(Task, State) -> Result when
+    Task    :: wp_api_tasks(),
+    State   :: woodpecker_state(),
+    Result  :: woodpecker_state().
+
+may_start_now(#wp_api_tasks{priority = Priority} = Task, State = #woodpecker_state{ets = Ets}) ->
 	case is_another_task_with_same_nonce_group_running(Ets, Task) of
 		false ->
 		    Quota = get_quota(State),
+		    Budget = get_budget_quota(State),
+		    Current = State#woodpecker_state{api_requests_current_quota = Quota, api_budget_current_quota = Budget},
 		    case Priority of
 		        'urgent' ->
-		            request(connect(State#woodpecker_state{api_requests_current_quota = Quota}), Task);
+		            request(connect(Current), Task);
 		        'high' when Quota > 0 ->
-		            request(connect(State#woodpecker_state{api_requests_current_quota = Quota}), Task);
+		            case fits_budget(Task, Budget) of
+		                true -> request(connect(Current), Task);
+		                false -> State
+		            end;
 		        _ ->
 		            State
 		    end;
 		true ->
 			State
 	end.
+
+-spec raise_priority(Task, Priority, State) -> Result when
+    Task        :: wp_api_tasks(),
+    Priority    :: priority(),
+    State       :: woodpecker_state(),
+    Result      :: woodpecker_state().
+
+raise_priority(#wp_api_tasks{status = 'new'} = Task, Priority, State = #woodpecker_state{ets = Ets}) ->
+    Raised = Task#wp_api_tasks{priority = Priority},
+    true = ets:insert(Ets, Raised),
+    may_start_now(Raised, State);
+raise_priority(Task, Priority, State = #woodpecker_state{ets = Ets}) ->
+    true = ets:insert(Ets, Task#wp_api_tasks{priority = Priority}),
+    State.
+
+-spec is_queued(Task) -> boolean() when
+    Task :: wp_api_tasks().
+
+is_queued(#wp_api_tasks{status = Status}) -> Status =:= 'new' orelse Status =:= 'need_retry'.
+
+-spec priority_rank(Priority) -> 0..3 when
+    Priority :: priority().
+
+priority_rank('low') -> 0;
+priority_rank('normal') -> 1;
+priority_rank('high') -> 2;
+priority_rank('urgent') -> 3.
 
 -spec is_another_task_with_same_nonce_group_running(Ets, WPTask) -> Result when
 	Ets		:: atom() | ets:tid(),
@@ -501,9 +555,11 @@ request(#woodpecker_state{
         current_gun_pid = GunPid,
         gun_pids = GunPids,
         api_requests_current_quota = Api_requests_current_quota,
+        api_budget_current_quota = Api_budget_current_quota,
         ets = Ets,
         paralell_requests_current_quota = Paralell_requests_current_quota
-    } = State, #wp_api_tasks{method = Method, url = Url, headers = Headers, body = Body, ref = OldReqRef, retry_count = Retry_count} = Task) ->
+    } = State0, #wp_api_tasks{method = Method, url = Url, headers = Headers, body = Body, ref = OldReqRef, retry_count = Retry_count, budget = Cost} = Task) ->
+    State = State0#woodpecker_state{api_budget_current_quota = spend_budget(Api_budget_current_quota, Cost)},
     ReqRef = case Body of
         'undefined' ->
             gun:request(GunPid, Method, may_apply(Url), may_apply(Headers), <<>>);
@@ -613,6 +669,33 @@ get_quota(#woodpecker_state{
     RequestsInPeriod = requests_in_period(Ets,NewThan),
     Requests_allowed_by_api-RequestsInPeriod.
 
+-spec get_budget_quota(State) -> Result when
+    State   :: woodpecker_state(),
+    Result  :: 'infinity' | integer().
+
+get_budget_quota(#woodpecker_state{budget_allowed_by_api = 'infinity'}) ->
+    'infinity';
+get_budget_quota(#woodpecker_state{
+        budget_allowed_by_api = Budget_allowed_by_api,
+        budget_allowed_in_period = Budget_allowed_in_period,
+        ets = Ets}) ->
+    Budget_allowed_by_api - budget_in_period(Ets, get_time() - Budget_allowed_in_period).
+
+-spec fits_budget(Task, BudgetQuota) -> boolean() when
+    Task        :: wp_api_tasks(),
+    BudgetQuota :: 'infinity' | integer().
+
+fits_budget(_Task, 'infinity') -> true;
+fits_budget(#wp_api_tasks{budget = Cost}, BudgetQuota) -> Cost =< BudgetQuota.
+
+-spec spend_budget(BudgetQuota, Cost) -> Result when
+    BudgetQuota :: 'infinity' | integer(),
+    Cost        :: non_neg_integer(),
+    Result      :: 'infinity' | integer().
+
+spend_budget('infinity', _Cost) -> 'infinity';
+spend_budget(BudgetQuota, Cost) -> BudgetQuota - Cost.
+
 % @doc join chunked data
 -spec chunk_data (OldData, NewData) -> Result when
     OldData :: 'undefined' | binary(),
@@ -706,6 +789,33 @@ requests_in_period(Ets, DateFrom) ->
             }
         ],
     ets:select_count(Ets, MS).
+
+-spec budget_in_period(Ets, DateFrom) -> Result when
+    Ets         :: atom(),
+    DateFrom    :: pos_integer(),
+    Result      :: non_neg_integer().
+
+budget_in_period(Ets, DateFrom) ->
+    MS = [{
+            #wp_api_tasks{status = '$2', last_response_date = '$1', request_date = '$3', budget = '$4', _ = '_'},
+                [
+                    {'orelse',
+                        {'andalso',
+                            {'>','$1',{const,DateFrom}},
+                            {'=/=','$1','undefined'},
+                            {'=/=','$2','need_retry'}
+                        },
+                        {'andalso',
+                            {'>','$3',{const,DateFrom}},
+                            {'=/=','$3','undefined'},
+                            {'=:=','$2','processing'}
+                        }
+                    }
+                ],
+                ['$4']
+            }
+        ],
+    lists:sum(ets:select(Ets, MS)).
 
 % @doc get active requests
 -spec active_requests(Ets) -> Result when
@@ -875,9 +985,10 @@ run_task(State = #woodpecker_state{
 % when we do not have free slots
 run_task(State = #woodpecker_state{
         api_requests_current_quota = Api_requests_current_quota,
+        api_budget_current_quota = Api_budget_current_quota,
         paralell_requests_current_quota = Paralell_requests_current_quota,
         max_paralell_requests_per_conn = Max_paralell_requests_per_conn
-    }, _Stage, _Tasks) when Api_requests_current_quota =< 0 orelse Paralell_requests_current_quota =< 0 ->
+    }, _Stage, _Tasks) when Api_requests_current_quota =< 0 orelse Paralell_requests_current_quota =< 0 orelse Api_budget_current_quota =< 0 ->
     State#woodpecker_state{paralell_requests_current_quota = Max_paralell_requests_per_conn};
 
 % run_task order_stage (when have free slots we able to select tasks with current parameters)
@@ -889,7 +1000,9 @@ run_task(State = #woodpecker_state{
     NewState = run_task(State, 'cast_stage', Tasks),
     run_task(NewState, 'order_stage', [T1|T2]);
 
-%% run_task cast_stage
+run_task(#woodpecker_state{api_budget_current_quota = Api_budget_current_quota} = State, 'cast_stage', [H|_T])
+        when is_integer(Api_budget_current_quota), H#wp_api_tasks.budget > Api_budget_current_quota ->
+    State#woodpecker_state{api_budget_current_quota = 0};
 run_task(#woodpecker_state{ets = Ets} = State, 'cast_stage', [H|T]) ->
 	case is_another_task_with_same_nonce_group_running(Ets, H) of
 		false ->

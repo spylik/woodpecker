@@ -28,16 +28,17 @@ ifeq ($(shell basename $(shell dirname $(shell dirname $(realpath $(lastword $(M
 endif
 
 DEPS 		= gun
-TEST_DEPS	= cowboy teaser erlroute
+TEST_DEPS	= ranch cowboy teaser erlroute
 SHELL_DEPS	= sync
 
 # our deps
 dep_teaser 		= git https://github.com/spylik/teaser 		develop
 dep_erlroute 	= git https://github.com/spylik/erlroute	master
 # 3-rd party deps
-dep_gun 	    = git https://github.com/ninenines/gun				master
-dep_ranch		= git https://github.com/ninenines/ranch			master
-dep_cowboy      = git https://github.com/ninenines/cowboy.git       master
+dep_gun 	    = git https://github.com/ninenines/gun				2.6.0
+dep_cowlib		= git https://github.com/ninenines/cowlib			2.20.0
+dep_ranch		= git https://github.com/ninenines/ranch			2.3.0
+dep_cowboy      = git https://github.com/ninenines/cowboy.git       2.19.0
 
 # use with travis
 ifeq ($(USER),travis)

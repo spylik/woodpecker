@@ -30,14 +30,19 @@
         'heartbeat_freq'                        % heartbeat frequency (in milliseconds)
             => 1000 | pos_integer(),
         'cleanup_completed_requests'            % flush data for completed requests?
-            => true | boolean()
+            => true | boolean(),
+        'budget_allowed_by_api'
+            => 'infinity' | pos_integer(),
+        'budget_allowed_in_period'
+            => pos_integer()
     }.
 
 -type request_opt() :: #{
     'priority'          => priority(),
     'tags'              => 'undefined' | tags(),
     'nodupes_group'     => 'undefined' | term(),
-    'nonce_group'       => 'undefined' | term()
+    'nonce_group'       => 'undefined' | term(),
+    'budget'            => non_neg_integer()
 }.
 
 -type output()      :: #{
@@ -76,10 +81,13 @@
         max_freeze_for_incomplete_requests      :: 3600000 | pos_integer(), % 3600000 is 1 hour
         heartbeat_freq                          :: 1000 | pos_integer(),
         cleanup_completed_requests              :: 'true' | boolean(),
+        budget_allowed_by_api = 'infinity'      :: 'infinity' | pos_integer(),
+        budget_allowed_in_period                :: 'undefined' | pos_integer(),
         % woodpecker operations section
         ets                                     :: atom(),
         api_requests_current_quota              :: integer(),
         paralell_requests_current_quota         :: integer(),
+        api_budget_current_quota = 'infinity'   :: 'infinity' | integer(),
         heartbeat_tref                          :: reference(),
         current_gun_pid                         :: pid() | 'undefined',
         gun_pids = #{}                          :: #{} | #{pid() => gun_pid_prop()}
@@ -129,6 +137,7 @@
         retry_count = 0         :: non_neg_integer() | mspec(),
         nodupes_group           :: 'undefined' | term() | mspec(),
         nonce_group             :: 'undefined' | term() | mspec(),
+        budget = 1              :: non_neg_integer() | mspec(),
         insert_date             :: pos_integer() | mspec(),
         report_nofin_to         :: 'undefined' | report() | mspec(),
         report_to               :: 'undefined' | report() | mspec(),
@@ -151,6 +160,4 @@
         req_per_gun_quota = 'infinity' :: req_per_gun_quota()
     }).
 -type gun_pid_prop() :: #gun_pid_prop{}.
-
-
 
