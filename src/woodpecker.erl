@@ -474,13 +474,15 @@ raise_priority(Task, Priority, State = #woodpecker_state{ets = Ets}) ->
     true = ets:insert(Ets, Task#wp_api_tasks{priority = Priority}),
     State.
 
--spec is_queued(Task) -> boolean() when
-    Task :: wp_api_tasks().
+-spec is_queued(Task) -> Result when
+    Task :: wp_api_tasks(),
+    Result :: boolean().
 
 is_queued(#wp_api_tasks{status = Status}) -> Status =:= 'new' orelse Status =:= 'need_retry'.
 
--spec priority_rank(Priority) -> 0..3 when
-    Priority :: priority().
+-spec priority_rank(Priority) -> Result when
+    Priority :: priority(),
+    Result   :: 0..3.
 
 priority_rank('low') -> 0;
 priority_rank('normal') -> 1;
@@ -681,9 +683,10 @@ get_budget_quota(#woodpecker_state{
         ets = Ets}) ->
     Budget_allowed_by_api - budget_in_period(Ets, get_time() - Budget_allowed_in_period).
 
--spec fits_budget(Task, BudgetQuota) -> boolean() when
+-spec fits_budget(Task, BudgetQuota) -> Result when
     Task        :: wp_api_tasks(),
-    BudgetQuota :: 'infinity' | integer().
+    BudgetQuota :: 'infinity' | integer(),
+    Result      :: boolean().
 
 fits_budget(_Task, 'infinity') -> true;
 fits_budget(#wp_api_tasks{budget = Cost}, BudgetQuota) -> Cost =< BudgetQuota.
